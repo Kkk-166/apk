@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="live_auto_block">自动调整块长度</string>
+    <string name="live_auto_block_help">可选，按声音分别保存。开始前会测量处理时间，在保留额外上下文的前提下把块增大到最多 0.50 秒。这可能会增加延迟和准备时间。已保存的块为最小值；当前生效的块会显示在状态中。关闭后会使用你设定的确切块。如果设备负载发生变化，请重新启动以重新校准。</string>
+    <string name="live_auto_block_calibrating">正在检查处理能力 · %1$d 毫秒块</string>
+    <string name="live_auto_block_slow">即使使用 0.50 秒的块，处理余量仍然不足。请减少额外上下文或改用更轻量的模型，然后重试。你已保存的设置未被更改。</string>
+</resources>

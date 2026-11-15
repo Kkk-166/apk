@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="cellular_title">电话通话 · 实验性</string>
+    <string name="cellular_destination">电话通话</string>
+    <string name="cellular_open_phone">打开电话应用</string>
+    <string name="cellular_help">仅支持 Samsung S23+ (SM-S916N)。需要 Shizuku，无需 root。请先开启虚拟麦克风，再使用听筒拨打或接听电话。出现错误或音频路由发生变化时，会保持原声屏蔽并结束通话。按“停止”会保持通话连接，并恢复你的原声。在检测到连接之前的短暂时间内，无法保证屏蔽生效。</string>
+    <string name="cellular_waiting">正在等待来电</string>
+    <string name="cellular_waiting_help">请使用听筒拨打或接听电话。连接后将自动开始转换。等待期间会释放麦克风。</string>
+    <string name="cellular_ready">选择你的声音并开启虚拟麦克风，然后拨打或接听电话。</string>
+    <string name="cellular_running">仅向通话发送你转换后的声音。对方的声音保持不变。</string>
+    <string name="cellular_no_call">请先接通一个普通电话，然后返回此处开始转换。</string>
+    <string name="cellular_route">请使用手机听筒。不支持免提、蓝牙和耳机。转换过程中更改音频路由会保持原声屏蔽并结束通话。</string>
+    <string name="cellular_unsupported">此实验性通话模式目前仅支持经过测试、且系统音频控件兼容的 Samsung S23+ (SM-S916N)。</string>
+    <string name="cellular_muted">手机麦克风已静音。请先在“电话”应用中取消静音，再开始转换。</string>
+    <string name="cellular_busy">另一个通话音频功能正在使用麦克风控件。请关闭实时翻译后重试。</string>
+    <string name="cellular_stalled">音频处理或监听被中断，因此已请求结束通话。只有在确认通话已结束后，才会恢复原来的麦克风。</string>
+    <string name="cellular_hangup_failed">无法确认通话已结束或麦克风已恢复。原声屏蔽不会被解除。请在“电话”应用中手动结束通话。</string>
+    <string name="cellular_restore_failed">无法确认麦克风已自动恢复。请先结束当前通话，然后重试。</string>
+</resources>
