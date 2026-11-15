@@ -420,12 +420,12 @@ class LiveEngine(private val context: Context, private val rvc: Rvc, val params:
                     while (outPeaks.size > 250) outPeaks.removeAt(0)
                     val finished = System.nanoTime()
                     val took = (finished - started) / 1e9
-                    val t = DoubleArray(5) { (rvc.timing[it] - before[it]) * 1000 }
+                    val t = DoubleArray(9) { (rvc.timing[it] - before[it]) * 1000 }
                     val thermal = power.currentThermalStatus
                     val memory = Debug.getNativeHeapAllocatedSize() / 1e6
                     val fields = listOf(String.format(Locale.US, "%.3f", (started - begun) / 1e9), "${computeAll.size + 1}",
-                        f1(backlog * 1000.0 / 48000), f1(took * 1000), f1(core.lastPrepMs), f1(t[0]), f1(t[1]), f1(t[2]), f1(t[3]),
-                        f1(t[4]), f1(core.lastPostMs + (finished - modelled) / 1e6), f1(queued / 48.0), "${events - lastUnder}",
+                        f1(backlog * 1000.0 / 48000), f1(took * 1000), f1(core.lastPrepMs), f1(t[2]), f1(t[3]), f1(t[5]), f1(t[6]),
+                        f1(t[4]), f1(t[7] * 1000 + (finished - modelled) / 1e6), f1(queued / 48.0), "${events - lastUnder}",
                         f1((missing - lastMissing) / 48.0), "$drops", f1(cut / 48.0), f1(extraCushion / 48.0),
                         "${core.lastOffset}", "$thermal", String.format(Locale.US, "%.0f", memory),
                         f1(db(core.lastInPeak)), f1(db(core.lastRawPeak)), if (core.lastClipped) "1" else "0")
@@ -469,12 +469,12 @@ class LiveEngine(private val context: Context, private val rvc: Rvc, val params:
                         csv = StringBuilder()
                         io.submit { blockLog?.write(text); blockLog?.flush() }
                         val s = snapshot()
-                        val d = DoubleArray(5) { rvc.timing[it] - lastTiming[it] }
+                        val d = DoubleArray(9) { rvc.timing[it] - lastTiming[it] }
                         lastTiming = rvc.timing.copyOf()
                         log(String.format(Locale.US, "step %d compute %.3f max %.3f latency %.2f under %d drops %d heap %.0f MB thermal %d " +
                             "| seconds: HuBERT %.3f, RMVPE %.3f, enc %.3f, decoder %.3f, other %.3f",
                             s.steps, s.compute, s.computeMax, s.latency, s.underruns, s.drops, memory, thermal,
-                            d[0], d[1], d[2], d[3], d[4]))
+                            d[2], d[3], d[5], d[6], d[4] + d[7]))
                     }
                 }
             }

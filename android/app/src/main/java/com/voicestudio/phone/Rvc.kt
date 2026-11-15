@@ -74,7 +74,7 @@ class Rvc(commonDir: File, private val modelDir: File, private val threads: Int 
     private val split = ep == "split" && File(modelDir, "model.dec_a.onnx").isFile && File(modelDir, "model.dec_b.onnx").isFile
     private val decFixed = qnnOptions(ep) != null || ep == "ncnn_gpu" || split || allowFallback
     val decFrames = live?.decoderFrames ?: DEC_FRAMES
-    val timing = DoubleArray(5)
+    val timing = DoubleArray(9)  // 0 load,1 decode,2 hubert,3 rmvpe,4 index,5 enc,6 dec,7 post,8 write
     val window = frontChunk + 320 + 2 * 16000
     val realtimeWindow: Int? = if (live != null && fixedWindows) live.windowFrames else null
     private val frames = realtimeWindow ?: (window / 160)
@@ -249,11 +249,10 @@ class Rvc(commonDir: File, private val modelDir: File, private val threads: Int 
         val zn = Dsp.stretchLinear(z, 192, pLen, n)
         val f0n = Dsp.stretchNearest(f0, n)  // no n/pLen factor: the excitation is built at n frames directly
         val sine = Dsp.nsfSource(f0n, rng, upp = decoderHop, sampleRate = modelSampleRate)
-        clock.lap(4)
         // a frame more each side for the formant's resampling back to 48 kHz
         var audio = decode(zn, n, sine, max(0, floor(keepFrom * factor).toInt() - 1), min(n, ceil(keepTo * factor).toInt() + 1))
-        clock.lap(3)
-        return modelSpec.output48(audio, pLen, factor, false).also { clock.lap(4) }
+        clock.lap(6)
+        return modelSpec.output48(audio, pLen, factor, false).also { clock.lap(7) }
     }
 
     /** Realtime: one 16 kHz window (past context plus the newest audio, a multiple of 320 samples) -> 48 kHz audio for
@@ -283,12 +282,11 @@ class Rvc(commonDir: File, private val modelDir: File, private val threads: Int 
             for (c in 0 until 192) System.arraycopy(zn, c * n, it, c * (n + pad) + pad, n)
         }
         val sp = if (pad == 0) source else FloatArray((n + pad) * decoderHop).also { System.arraycopy(source, 0, it, pad * decoderHop, source.size) }
-        clock.lap(4)
         var audio = runDec(zp, n + pad, sp)
         if (pad > 0) audio = audio.copyOfRange(pad * decoderHop, audio.size)
-        clock.lap(3)
+        clock.lap(6)
         audio = modelSpec.output48(audio, d, factor, true)
-        clock.lap(4)
+        clock.lap(7)
         val keep = (d - min(tail, d)) * 480  // drop the decoder's left context
         return audio.copyOfRange(keep, audio.size)
     }
@@ -306,7 +304,7 @@ class Rvc(commonDir: File, private val modelDir: File, private val threads: Int 
         val pLen = x16.size / 160
         // content: 50 fps, last frame repeated, each frame doubled to 100 fps
         val feats50 = run(hubert, "audio", x16, longArrayOf(1, x16.size.toLong()))
-        clock.lap(0)
+        clock.lap(2)
         val f50 = feats50.size / 768
         val phone = FloatArray(pLen * 768)
         for (t in 0 until pLen) {
@@ -328,7 +326,7 @@ class Rvc(commonDir: File, private val modelDir: File, private val threads: Int 
             val salience = run(rmvpe, "audio", x16, longArrayOf(1, x16.size.toLong()))
             f0 = Dsp.decodeF0(salience, salience.size / 360).copyOf(pLen)
         }
-        clock.lap(1)
+        clock.lap(3)
         f0 = Dsp.fillUnvoiced(f0, if (st.unvoicedKeep) UNVOICED_FILL_FRAMES else null)
         f0 = Dsp.shapePitch(f0, st.lowKnee, st.lowRatio, st.highKnee, st.highRatio,
             INTONATION_CENTER_HZ, if (st.expand) st.expandRatio else 1.0)
@@ -336,7 +334,6 @@ class Rvc(commonDir: File, private val modelDir: File, private val threads: Int 
         for (t in f0.indices) f0[t] *= key
         val coarse = LongArray(pLen) { Dsp.coarse(f0[it]) }
         val noise = FloatArray(192 * pLen) { rng.nextGaussian().toFloat() }
-        clock.lap(4)
         val z = OnnxTensor.createTensor(env, FloatBuffer.wrap(phone), longArrayOf(1, pLen.toLong(), 768)).use { ph ->
             OnnxTensor.createTensor(env, LongBuffer.wrap(coarse), longArrayOf(1, pLen.toLong())).use { pi ->
                 OnnxTensor.createTensor(env, FloatBuffer.wrap(noise), longArrayOf(1, 192, pLen.toLong())).use { no ->
@@ -344,7 +341,7 @@ class Rvc(commonDir: File, private val modelDir: File, private val threads: Int 
                 }
             }
         }
-        clock.lap(2)
+        clock.lap(5)
         return Analysis(z, f0, pLen)
     }
 

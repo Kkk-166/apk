@@ -926,6 +926,10 @@ class MainActivity : Activity() {
                 startActivity(Intent(android.provider.Settings.ACTION_APP_LOCALE_SETTINGS, Uri.parse("package:$packageName")))
             }
         })
+        guide.addView(Button(this, null, 0, R.style.SoftButton).apply {
+            text = "M1b 性能基线"
+            setOnClickListener { startActivity(Intent(this@MainActivity, M1BenchActivity::class.java)) }
+        })
         // where the models run
         val compute = card(page)
         compute.addView(TextView(this).apply { text = str(R.string.ui_compute_devices_app_wide_settings); textSize = 13f; setTypeface(typeface, Typeface.BOLD) })
@@ -1396,8 +1400,8 @@ class MainActivity : Activity() {
                     AudioIo.writeWav(File(base, "test_output.wav"), y)
                     val t = engine!!.timing
                     android.util.Log.i("VoiceStudio", String.format(Locale.US,
-                        "converted %.1f s in %.1f s (model load %.1f s; %s): hubert %.1f, rmvpe %.1f, enc %.1f, dec %.1f, other %.1f",
-                        x.size.toFloat() / Rvc.SR, took, load, engineKey.substringAfter('|'), t[0], t[1], t[2], t[3], t[4]))
+                        "converted %.1f s in %.1f s (model load %.1f s; %s): load %.1f, decode %.1f, hubert %.1f, rmvpe %.1f, index %.1f, enc %.1f, dec %.1f, post %.1f, write %.1f",
+                        x.size.toFloat() / Rvc.SR, took, load, engineKey.substringAfter('|'), t[0], t[1], t[2], t[3], t[4], t[5], t[6], t[7], t[8]))
                 }
             }
         }
