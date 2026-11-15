@@ -1,17 +1,24 @@
 cmake_minimum_required(VERSION 3.22)
 project(vsdecoder CXX)
 
-# ncnn's prebuilt Android libraries with Vulkan (static), downloaded once at configure time and checked by hash
+# Build ncnn from source with OpenMP OFF. The prebuilt's libomp aborts in
+# __kmp_affinity_initialize on HyperOS after repeated decoder creation.
 include(FetchContent)
-FetchContent_Declare(ncnn_prebuilt
-    URL https://github.com/Tencent/ncnn/releases/download/20260526/ncnn-20260526-android-vulkan.zip
-    URL_HASH SHA256=26909c92eed35afed4a966b5e9e503fcb0a529691ea3f910ec2c94a4fff52804)
-FetchContent_GetProperties(ncnn_prebuilt)
-if(NOT ncnn_prebuilt_POPULATED)
-    FetchContent_Populate(ncnn_prebuilt)
+FetchContent_Declare(ncnn_source
+    URL https://github.com/Tencent/ncnn/releases/download/20260526/ncnn-20260526-full-source.zip)
+FetchContent_GetProperties(ncnn_source)
+if(NOT ncnn_source_POPULATED)
+    FetchContent_Populate(ncnn_source)
 endif()
-set(ncnn_DIR ${ncnn_prebuilt_SOURCE_DIR}/${ANDROID_ABI}/lib/cmake/ncnn)
-find_package(ncnn REQUIRED)
+
+set(NCNN_VULKAN ON CACHE BOOL "" FORCE)
+set(NCNN_OPENMP OFF CACHE BOOL "" FORCE)
+set(NCNN_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+set(NCNN_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(NCNN_BUILD_BENCHMARK OFF CACHE BOOL "" FORCE)
+set(NCNN_DISABLE_RTTI OFF CACHE BOOL "" FORCE)
+set(NCNN_DISABLE_EXCEPTION OFF CACHE BOOL "" FORCE)
+add_subdirectory(${ncnn_source_SOURCE_DIR} ${CMAKE_BINARY_DIR}/ncnn)
 
 add_library(vsdecoder SHARED ncnn_decoder.cpp)
 target_link_libraries(vsdecoder ncnn android log)
