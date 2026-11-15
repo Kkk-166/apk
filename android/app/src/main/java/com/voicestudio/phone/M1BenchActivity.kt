@@ -20,6 +20,7 @@ class M1BenchActivity : Activity() {
     private val ui = Handler(Looper.getMainLooper())
     private lateinit var status: TextView
     private lateinit var runButton: Button
+    private lateinit var dumpButton: Button
     private lateinit var modelSpinner: Spinner
     private lateinit var decoderSpinner: Spinner
     private lateinit var threadsSpinner: Spinner
@@ -42,6 +43,8 @@ class M1BenchActivity : Activity() {
         root.addView(label("线程")); root.addView(threadsSpinner)
         runButton = Button(this).apply { text = "开始测试" }
         root.addView(runButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        dumpButton = Button(this).apply { text = "导出音色对比中间特征（CPU）" }
+        root.addView(dumpButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         status = TextView(this).apply { textSize = 12f; setPadding(0, 16, 0, 0) }
         root.addView(status)
         setContentView(ScrollView(this).apply { addView(root) })
@@ -52,9 +55,36 @@ class M1BenchActivity : Activity() {
         threadsSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, listOf("2", "4", "6", "8"))
         threadsSpinner.setSelection(3)
         runButton.setOnClickListener { run() }
+        dumpButton.setOnClickListener { dumpFeatures() }
     }
 
     private fun label(s: String) = TextView(this).apply { text = s; textSize = 13f; setPadding(0, 10, 0, 4) }
+
+    private fun dumpFeatures() {
+        val models = modelsDir.listFiles { f -> f.isDirectory && File(f, "model.enc.onnx").isFile }?.map { it.name }?.sorted() ?: emptyList()
+        if (models.isEmpty()) { status.text = "没有模型"; return }
+        val modelName = models[modelSpinner.selectedItemPosition.coerceIn(0, models.size - 1)]
+        val dir = File(modelsDir, modelName)
+        val dumpDir = File(getExternalFilesDir(null), "m1c").apply { deleteRecursively(); mkdirs() }
+        runButton.isEnabled = false; dumpButton.isEnabled = false
+        status.text = "导出中间特征：$modelName / CPU / pitch=0 formant=0"
+        thread {
+            val fixture = File(cacheDir, "m1_fixture.wav")
+            try {
+                assets.open("m1_fixture.wav").use { i -> fixture.outputStream().use { o -> i.copyTo(o) } }
+                val engine = Rvc(commonDir, dir, 8, "cpu", "model.dec.onnx", "cpu", allowFallback = false, dumpDir = dumpDir)
+                val x = AudioIo.decode(this, Uri.fromFile(fixture))
+                val y = engine.convert(x, Rvc.Settings())
+                AudioIo.writeWav(File(dumpDir, "android_output.wav"), y)
+                engine.close()
+                ui.post { status.text = "DONE: ${dumpDir.absolutePath}\n${dumpDir.listFiles()?.joinToString { it.name }}" }
+            } catch (e: Throwable) {
+                ui.post { status.text = "失败：${e.message ?: e}" }
+            } finally {
+                ui.post { runButton.isEnabled = true; dumpButton.isEnabled = true }
+            }
+        }
+    }
 
     private fun tempC(): Double {
         val i = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))

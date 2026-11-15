@@ -39,7 +39,9 @@ class Rvc(commonDir: File, private val modelDir: File, private val threads: Int 
           cpuFixedWindows: Boolean = false,
           /** Diagnosis: ORT profiles of the NPU sessions (which device ran each node) go here as <model>_*.json. */
           private val profileDir: File? = null,
-          private val allowFallback: Boolean = false) : AutoCloseable {
+          private val allowFallback: Boolean = false,
+          /** M1c: write raw intermediate tensors here, once per name. */
+          private val dumpDir: File? = null) : AutoCloseable {
     /** A realtime step: [block] new frames, the last [tail] frames of the window decoded (block + crossfade + search). */
     data class LiveShape(val block: Int, val tail: Int, val fixedFormant: Double? = null, val windowFrames: Int = REALTIME_WINDOW) {
         init { require(windowFrames >= tail && windowFrames % 2 == 0); require(fixedFormant == null || (fixedFormant.isFinite() && fixedFormant in -2.0..2.0)) }
@@ -187,6 +189,18 @@ class Rvc(commonDir: File, private val modelDir: File, private val threads: Int 
         }
     }
     private val rng = Random(seed)
+    private val dumped = HashSet<String>()
+
+    private fun dump(name: String, data: FloatArray, shape: IntArray) {
+        val dir = dumpDir ?: return
+        synchronized(dumped) { if (!dumped.add(name)) return }
+        dir.mkdirs()
+        val f = File(dir, "$name.f32")
+        val bb = java.nio.ByteBuffer.allocate(data.size * 4).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        for (v in data) bb.putFloat(v)
+        f.outputStream().buffered().use { it.write(bb.array()) }
+        File(dir, "$name.shape").writeText(shape.joinToString(","))
+    }
 
     override fun close() {
         ncnn?.let { runCatching { it.close() } }; ncnn = null
@@ -306,6 +320,7 @@ class Rvc(commonDir: File, private val modelDir: File, private val threads: Int 
         val feats50 = run(hubert, "audio", x16, longArrayOf(1, x16.size.toLong()))
         clock.lap(2)
         val f50 = feats50.size / 768
+        dump("hubert", feats50, intArrayOf(f50, 768))
         val phone = FloatArray(pLen * 768)
         for (t in 0 until pLen) {
             val src = min(t / 2, f50)  // index f50 is the appended copy of the last frame
@@ -324,9 +339,11 @@ class Rvc(commonDir: File, private val modelDir: File, private val threads: Int 
             f0 = cache.f0.copyOf()
         } else {
             val salience = run(rmvpe, "audio", x16, longArrayOf(1, x16.size.toLong()))
+            dump("rmvpe_salience", salience, intArrayOf(salience.size / 360, 360))
             f0 = Dsp.decodeF0(salience, salience.size / 360).copyOf(pLen)
         }
         clock.lap(3)
+        dump("f0_raw", FloatArray(pLen) { f0[it].toFloat() }, intArrayOf(pLen))
         f0 = Dsp.fillUnvoiced(f0, if (st.unvoicedKeep) UNVOICED_FILL_FRAMES else null)
         f0 = Dsp.shapePitch(f0, st.lowKnee, st.lowRatio, st.highKnee, st.highRatio,
             INTONATION_CENTER_HZ, if (st.expand) st.expandRatio else 1.0)
@@ -342,12 +359,16 @@ class Rvc(commonDir: File, private val modelDir: File, private val threads: Int 
             }
         }
         clock.lap(5)
+        dump("encoder_z", z, intArrayOf(192, pLen))
         return Analysis(z, f0, pLen)
     }
 
     private fun runDec(z: FloatArray, frames: Int, sine: FloatArray): FloatArray {
         require(sine.size == frames * decoderHop) { "Decoder excitation length does not match model.json" }
+        dump("dec_in_z", z, intArrayOf(192, frames))
+        dump("dec_in_sine", sine, intArrayOf(sine.size))
         return runNativeDec(z, frames, sine).also {
+            dump("dec_out", it, intArrayOf(it.size))
             require(it.size == frames * decoderHop) { "Decoder output length does not match model.json; reimport the complete model folder" }
         }
     }
