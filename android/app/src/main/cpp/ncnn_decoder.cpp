@@ -74,7 +74,7 @@ Java_com_voicestudio_phone_NcnnDecoder_nativeDecode(JNIEnv* env, jclass, jlong h
     auto* d = reinterpret_cast<Decoder*>(handle);
     const jsize nz = env->GetArrayLength(z);
     const jsize ns = env->GetArrayLength(sine);
-    if (frames <= 0 || nz != 192LL * frames || (ns != frames * 480LL && ns != frames * 320LL)) return nullptr;
+    if (frames <= 0 || nz != 192LL * frames || (ns != frames * 480LL && ns != frames * 320LL && ns != frames * 400LL)) return nullptr;
     std::vector<float> zb(nz), sb(ns);
     env->GetFloatArrayRegion(z, 0, nz, zb.data());
     env->GetFloatArrayRegion(sine, 0, ns, sb.data());
