@@ -8,6 +8,7 @@ plugins {
 val releaseKeystore = System.getenv("VS_KEYSTORE")?.let { file(it) }?.takeIf { it.isFile }
 
 android {
+    buildFeatures { aidl = false }
     buildFeatures { aidl = true }
     namespace = "com.voicestudio.phone"
     compileSdk = 35

@@ -2,6 +2,7 @@ package com.voicestudio.phone
 
 import android.app.Activity
 import android.content.Intent
+import android.content.IntentFilter
 import android.net.Uri
 import android.os.BatteryManager
 import android.os.Build
@@ -56,8 +57,8 @@ class M1BenchActivity : Activity() {
     private fun label(s: String) = TextView(this).apply { text = s; textSize = 13f; setPadding(0, 10, 0, 4) }
 
     private fun tempC(): Double {
-        val bm = getSystemService(BATTERY_SERVICE) as BatteryManager
-        return bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_TEMPERATURE) / 10.0
+        val i = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        return (i?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0) ?: 0) / 10.0
     }
 
     private fun run() {
