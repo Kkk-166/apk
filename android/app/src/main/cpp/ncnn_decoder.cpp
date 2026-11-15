@@ -37,7 +37,9 @@ Java_com_voicestudio_phone_NcnnDecoder_nativeCreate(JNIEnv* env, jclass, jstring
     opt.use_fp16_storage = false;
     opt.use_fp16_arithmetic = false;
     opt.use_bf16_storage = false;
-    opt.num_threads = threads;
+    // ncnn's bundled OpenMP aborts in __kmp_affinity_initialize on HyperOS when it creates
+    // more than one worker; the decoder's compute is on Vulkan, so one CPU helper is enough.
+    opt.num_threads = 1;
     const char* p = env->GetStringUTFChars(param, nullptr);
     const char* m = env->GetStringUTFChars(model, nullptr);
     // The graph's input reshape names the piece length make_ncnn.py converted at (200 frames). Everything after it
