@@ -26,7 +26,19 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - name: Build APK
         working-directory: android
-        run: ./gradlew --no-daemon :app:assembleRelease
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon :app:assembleRelease 2>&1 | tee build.log
+      - name: Save build log on failure
+        if: failure()
+        working-directory: android
+        run: |
+          git config user.email "actions@github.com"
+          git config user.name "GitHub Actions"
+          git checkout -B build-log
+          git add -f build.log
+          git commit -m "build log run ${GITHUB_RUN_NUMBER}" || true
+          git push -f origin build-log
       - run: cp android/app/build/outputs/apk/release/app-release.apk VoiceStudio.apk
       - uses: actions/upload-artifact@v4
         with:
