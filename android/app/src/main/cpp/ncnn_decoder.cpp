@@ -4,6 +4,7 @@
 #include <fstream>
 #include <mutex>
 #include <sstream>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -25,6 +26,10 @@ struct Decoder {
 extern "C" JNIEXPORT jlong JNICALL
 Java_com_voicestudio_phone_NcnnDecoder_nativeCreate(JNIEnv* env, jclass, jstring param, jstring model, jboolean use_gpu,
                                                      jint threads) {
+    // HyperOS' CPU set makes libomp's default affinity fail an internal assertion.
+    // The decoder runs on Vulkan; keep the helper serial and disable OpenMP affinity.
+    setenv("KMP_AFFINITY", "disabled", 1);
+    setenv("OMP_NUM_THREADS", "1", 1);
     if (use_gpu) {
         std::call_once(gpu_once, [] { gpu_ok = ncnn::create_gpu_instance() == 0 && ncnn::get_gpu_count() > 0; });
     }
