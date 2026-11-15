@@ -211,6 +211,7 @@ class Rvc(commonDir: File, private val modelDir: File, private val threads: Int 
     /** progress(done, total) is called after each chunk. */
     fun convert(x48: FloatArray, st: Settings, progress: (Int, Int) -> Unit = { _, _ -> }): FloatArray {
         var x16 = Dsp.resample(x48, SR, SR16)
+        dump("input16k", x16, intArrayOf(x16.size))
         x16 = x16.copyOf(x16.size + Math.floorMod(-x16.size, UNIT))
         val chunk = if (fixedWindows) frontChunk else (CHUNK_S * SR16).toInt() / UNIT * UNIT
         val ctx = (CONTEXT_S * SR16).toInt() / UNIT * UNIT
