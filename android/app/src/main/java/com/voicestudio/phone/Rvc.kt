@@ -327,6 +327,7 @@ class Rvc(commonDir: File, private val modelDir: File, private val threads: Int 
             val src = min(t / 2, f50)  // index f50 is the appended copy of the last frame
             System.arraycopy(feats50, min(src, f50 - 1) * 768, phone, t * 768, 768)
         }
+        dump("enc_phone", phone, intArrayOf(pLen, 768))
         // pitch
         var f0: DoubleArray
         if (cache != null && cache.f0.size == pLen && cache.samples < x16.size) {
@@ -350,8 +351,11 @@ class Rvc(commonDir: File, private val modelDir: File, private val threads: Int 
             INTONATION_CENTER_HZ, if (st.expand) st.expandRatio else 1.0)
         val key = 2.0.pow((st.pitch - st.formant) / 12)  // the formant moves by time stretch; pitch compensates
         for (t in f0.indices) f0[t] *= key
+        dump("f0_shaped", FloatArray(pLen) { f0[it].toFloat() }, intArrayOf(pLen))
         val coarse = LongArray(pLen) { Dsp.coarse(f0[it]) }
+        dump("enc_coarse", FloatArray(pLen) { coarse[it].toFloat() }, intArrayOf(pLen))
         val noise = FloatArray(192 * pLen) { rng.nextGaussian().toFloat() }
+        dump("enc_noise", noise, intArrayOf(192, pLen))
         val z = OnnxTensor.createTensor(env, FloatBuffer.wrap(phone), longArrayOf(1, pLen.toLong(), 768)).use { ph ->
             OnnxTensor.createTensor(env, LongBuffer.wrap(coarse), longArrayOf(1, pLen.toLong())).use { pi ->
                 OnnxTensor.createTensor(env, FloatBuffer.wrap(noise), longArrayOf(1, 192, pLen.toLong())).use { no ->
