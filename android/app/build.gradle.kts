@@ -8,7 +8,6 @@ plugins {
 val releaseKeystore = System.getenv("VS_KEYSTORE")?.let { file(it) }?.takeIf { it.isFile }
 
 android {
-    buildFeatures { aidl = false }
     buildFeatures { aidl = true }
     namespace = "com.voicestudio.phone"
     compileSdk = 35
@@ -23,6 +22,12 @@ android {
     }
 
     signingConfigs {
+        create("fixed") {
+            storeFile = rootProject.file("fixed.keystore")
+            storePassword = "voicestudio"
+            keyAlias = "voicestudio"
+            keyPassword = "voicestudio"
+        }
         if (releaseKeystore != null) create("release") {
             storeFile = releaseKeystore
             storePassword = System.getenv("VS_KEYSTORE_PASSWORD")
@@ -34,7 +39,7 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName(if (releaseKeystore != null) "release" else "debug")
+            signingConfig = signingConfigs.getByName(if (releaseKeystore != null) "release" else "fixed")
         }
     }
     ndkVersion = "28.2.13676358"
