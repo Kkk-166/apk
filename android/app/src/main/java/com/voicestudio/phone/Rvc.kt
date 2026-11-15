@@ -208,28 +208,6 @@ class Rvc(commonDir: File, private val modelDir: File, private val threads: Int 
         owned.clear()
     }
 
-    /** Blend the original input back over unvoiced frames (breath, whispers, unvoiced consonants):
-     *  RVC's NSF decoder turns high-energy noise into a synthetic, electric texture. */
-    private fun preserveUnvoiced(converted: FloatArray, original: FloatArray, mask: BooleanArray): FloatArray {
-        if (mask.isEmpty()) return converted
-        val n = min(converted.size, original.size)
-        val gain = FloatArray(n)
-        val fade = 240  // 5 ms at 48 kHz
-        var w = 0f
-        for (i in 0 until n) {
-            val target = if (mask[min(i / 480, mask.size - 1)]) 1f else 0f
-            w = when {
-                target > w -> min(1f, w + 1f / fade)
-                target < w -> max(0f, w - 1f / fade)
-                else -> w
-            }
-            gain[i] = w
-        }
-        val out = converted.copyOf()
-        for (i in 0 until n) out[i] = converted[i] * (1f - gain[i]) + original[i] * gain[i]
-        return out
-    }
-
     /** progress(done, total) is called after each chunk. */
     fun convert(x48: FloatArray, st: Settings, progress: (Int, Int) -> Unit = { _, _ -> }): FloatArray {
         var x16 = Dsp.resample(x48, SR, SR16)
@@ -240,7 +218,6 @@ class Rvc(commonDir: File, private val modelDir: File, private val threads: Int 
         val fade = (FADE_S * SR16).toInt() / UNIT * UNIT
         val out = FloatArray(x16.size * 3)
         val weight = FloatArray(out.size)
-        val unvoiced = BooleanArray(x48.size / 480)
         val starts = (0 until x16.size step chunk).toList()
         for ((i, start) in starts.withIndex()) {
             val coreEnd = min(start + chunk + fade, x16.size)
@@ -253,15 +230,9 @@ class Rvc(commonDir: File, private val modelDir: File, private val threads: Int 
                 x16.copyOfRange(lo, hi).copyOf(window)
             }
             // only the frames this window contributes go through the decoder, not its context
-            val w = window(win, st, (start - lo) / 160, (coreEnd - lo + 159) / 160)
-            val y = w.audio
+            val y = window(win, st, (start - lo) / 160, (coreEnd - lo + 159) / 160)
             val a = (start - lo) * 3
             val n = (coreEnd - lo) * 3 - a
-            val frame0 = start / 160
-            for (f in w.unvoiced.indices) {
-                val t = frame0 + f
-                if (t in unvoiced.indices) unvoiced[t] = w.unvoiced[f]
-            }
             val f = fade * 3
             for (k in 0 until n) {
                 var w = 1f
@@ -272,8 +243,7 @@ class Rvc(commonDir: File, private val modelDir: File, private val threads: Int 
             }
             progress(i + 1, starts.size)
         }
-        var y = FloatArray(x48.size) { if (it < out.size) out[it] / max(weight[it], 1e-6f) else 0f }
-        if (st.unvoicedKeep) y = preserveUnvoiced(y, x48, unvoiced)
+        val y = FloatArray(x48.size) { if (it < out.size) out[it] / max(weight[it], 1e-6f) else 0f }
         if (st.rmsMixRate < 1) {  // follow the input's loudness envelope, as the studio does
             val rIn = Dsp.frameRms(x48)
             val rOut = Dsp.frameRms(y)
@@ -286,15 +256,9 @@ class Rvc(commonDir: File, private val modelDir: File, private val threads: Int 
 
     /** One window of 16 kHz audio (a multiple of 320 samples) -> 48 kHz audio of the same duration, of which only
      *  frames [keepFrom, keepTo) are decoded (the rest is the window's context and stays silent). */
-    private data class Window(val audio: FloatArray, val unvoiced: BooleanArray)
-
-    private fun window(x16: FloatArray, st: Settings, keepFrom: Int, keepTo: Int): Window {
+    private fun window(x16: FloatArray, st: Settings, keepFrom: Int, keepTo: Int): FloatArray {
         val clock = Lap()
-        val a = analyze(x16, st, null, clock)
-        val (z, f0, pLen) = a
-        val from = keepFrom.coerceIn(0, pLen)
-        val to = keepTo.coerceIn(from, pLen)
-        val unvoiced = BooleanArray(to - from) { a.unvoiced[from + it] }
+        val (z, f0, pLen) = analyze(x16, st, null, clock)
         val factor = 2.0.pow(st.formant / 12)
         val n = ceil(pLen * factor).toInt()
         val zn = Dsp.stretchLinear(z, 192, pLen, n)
@@ -303,7 +267,7 @@ class Rvc(commonDir: File, private val modelDir: File, private val threads: Int 
         // a frame more each side for the formant's resampling back to 48 kHz
         var audio = decode(zn, n, sine, max(0, floor(keepFrom * factor).toInt() - 1), min(n, ceil(keepTo * factor).toInt() + 1))
         clock.lap(6)
-        return Window(modelSpec.output48(audio, pLen, factor, false).also { clock.lap(7) }, unvoiced)
+        return modelSpec.output48(audio, pLen, factor, false).also { clock.lap(7) }
     }
 
     /** Realtime: one 16 kHz window (past context plus the newest audio, a multiple of 320 samples) -> 48 kHz audio for
@@ -348,7 +312,7 @@ class Rvc(commonDir: File, private val modelDir: File, private val threads: Int 
         fun lap(stage: Int) { val t = System.nanoTime(); timing[stage] += (t - t0) / 1e9; t0 = t }
     }
 
-    private data class Analysis(val z: FloatArray, val f0: DoubleArray, val pLen: Int, val unvoiced: BooleanArray)
+    private data class Analysis(val z: FloatArray, val f0: DoubleArray, val pLen: Int)
 
     /** HuBERT, RMVPE, pitch shaping and enc over one 16 kHz window: the latent z [192, pLen] and the shifted f0. */
     private fun analyze(x16: FloatArray, st: Settings, cache: StreamState?, clock: Lap): Analysis {
@@ -401,7 +365,7 @@ class Rvc(commonDir: File, private val modelDir: File, private val threads: Int 
         }
         clock.lap(5)
         dump("encoder_z", z, intArrayOf(192, pLen))
-        return Analysis(z, f0, pLen, BooleanArray(pLen) { f0[it] <= 0 })
+        return Analysis(z, f0, pLen)
     }
 
     private fun runDec(z: FloatArray, frames: Int, sine: FloatArray): FloatArray {
