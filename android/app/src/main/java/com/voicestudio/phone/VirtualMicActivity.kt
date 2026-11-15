@@ -129,8 +129,13 @@ object VirtualMicSession {
             var params = saved.copy(block = block,
                 context = intent.getIntExtra("context", profile.getInt("live_context", LiveParams.defaultContext(block, saved.crossfade))), thresholdDb = threshold.toDouble(), gainDb = outputDb.toDouble(),
                 skipQuiet = !intent.getBooleanExtra("no_quiet_skip",false))
-            val dec = if (File(model,"model.dec.w8a16.onnx").isFile) "model.dec.w8a16.onnx" else "model.dec.onnx"
-            val threads = intent.getIntExtra("threads",1).also { require(it in 1..8) }
+            // Virtual mic used to force QNN + one thread. On non-Snapdragon phones that silently
+            // fell back to a single-thread CPU session. Use the app's thread setting and the same
+            // CPU/GPU path as file conversion instead.
+            val threads = intent.getIntExtra("threads", prefs.getInt("threads", 8)).coerceIn(1, 8)
+            val hasGpu = File(model, "model.dec.ncnn.param").isFile && File(model, "model.dec.ncnn.bin").isFile
+            val dec = "model.dec.onnx"
+            val decEp = if (hasGpu) "ncnn_gpu" else "cpu"
             android.system.Os.setenv("ADSP_LIBRARY_PATH", "${context.applicationInfo.nativeLibraryDir};/system/lib/rfsa/adsp;/system/vendor/lib/rfsa/adsp;/dsp", true)
             var core: LiveCore
             var warmupMaxMs: Double
@@ -138,7 +143,7 @@ object VirtualMicSession {
                 if (!running) throw InterruptedException()
                 engine?.close(); engine = null
                 if (autoBlock) status = str(R.string.live_auto_block_calibrating, block * 10)
-                engine = Rvc(File(base,"common"), model, threads, "qnn_htp", dec, "qnn_htp",
+                engine = Rvc(File(base,"common"), model, threads, decEp, dec, "cpu",
                     live=Rvc.LiveShape(block,params.tail,settings.formant,params.window(null)))
                 core = LiveCore(engine, params)
                 val timing = AutoBlock.measure(core, settings) { if (!running) throw InterruptedException() }
@@ -149,7 +154,7 @@ object VirtualMicSession {
                 if (next == block) break
                 block = next; params = params.copy(block = block)
             }
-            log("CONFIG model=${model.name} block_ms=${block*10} requested_block_ms=${requestedBlock*10} auto_block=$autoBlock context_ms=${params.context*10} window_ms=${params.window(null)*10} crossfade_ms=${params.crossfade*10} cushion_ms=${(params.cushion*1000).roundToInt()} threshold_db=${params.thresholdDb} input_gain_db=$inputDb output_gain_db=${params.gainDb} decoder=$dec threads=$threads bypass=false")
+            log("CONFIG model=${model.name} block_ms=${block*10} requested_block_ms=${requestedBlock*10} auto_block=$autoBlock context_ms=${params.context*10} window_ms=${params.window(null)*10} crossfade_ms=${params.crossfade*10} cushion_ms=${(params.cushion*1000).roundToInt()} threshold_db=${params.thresholdDb} input_gain_db=$inputDb output_gain_db=${params.gainDb} front=cpu decoder=$decEp threads=$threads bypass=false")
             log("OPTIMIZATION fixed_formant=${settings.formant} decoder_frames=${engine!!.decFrames} skip_quiet=${params.skipQuiet}")
             // Quiet blocks finish early; retain room for a full inference when speech begins.
             val bufferMs = (params.cushion * 1000).roundToInt() + 20
