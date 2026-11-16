@@ -24,6 +24,10 @@ class M1BenchActivity : Activity() {
     private lateinit var modelSpinner: Spinner
     private lateinit var decoderSpinner: Spinner
     private lateinit var threadsSpinner: Spinner
+    private var benchUri: Uri? = null
+    private var benchLabel: String = "内置 m1_fixture.wav（3.000 s）"
+
+    companion object { private const val PICK_BENCH = 1001 }
 
     private val modelsDir by lazy { File(getExternalFilesDir(null), "models") }
     private val commonDir by lazy { File(getExternalFilesDir(null), "common") }
@@ -37,6 +41,14 @@ class M1BenchActivity : Activity() {
                 "冷启动=每次重建 Rvc；热启动=一次加载后复用。"
             textSize = 12f; setPadding(0, 12, 0, 12)
         })
+        root.addView(Button(this).apply {
+            text = "选择测试音频（默认内置 3 秒）"
+            setOnClickListener {
+                startActivityForResult(
+                    Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("audio/*"),
+                    PICK_BENCH)
+            }
+        }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         modelSpinner = Spinner(this); decoderSpinner = Spinner(this); threadsSpinner = Spinner(this)
         root.addView(label("模型")); root.addView(modelSpinner)
         root.addView(label("解码器")); root.addView(decoderSpinner)
@@ -56,6 +68,22 @@ class M1BenchActivity : Activity() {
         threadsSpinner.setSelection(3)
         runButton.setOnClickListener { run() }
         dumpButton.setOnClickListener { dumpFeatures() }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != PICK_BENCH || resultCode != RESULT_OK) return
+        val uri = data?.data
+        if (uri == null) { status.text = "未选择文件"; return }
+        val persistent = try {
+            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            true
+        } catch (_: Throwable) {
+            false  // 持久授权失败不影响本轮：SAF 的临时读权限在 Activity 生命周期内有效
+        }
+        benchUri = uri
+        benchLabel = uri.toString() + if (persistent) "" else "（仅本轮有效）"
+        status.text = "测试音频：$benchLabel"
     }
 
     private fun label(s: String) = TextView(this).apply { text = s; textSize = 13f; setPadding(0, 10, 0, 4) }
@@ -106,7 +134,24 @@ class M1BenchActivity : Activity() {
         thread {
             val fixture = File(cacheDir, "m1_fixture.wav")
             try {
-                assets.open("m1_fixture.wav").use { i -> fixture.outputStream().use { o -> i.copyTo(o) } }
+                // 固定本轮输入：开始后不再读 benchUri，避免测试中途变化
+                val source: Uri = benchUri ?: run {
+                    assets.open("m1_fixture.wav").use { i -> fixture.outputStream().use { o -> i.copyTo(o) } }
+                    Uri.fromFile(fixture)
+                }
+                val inputLabel = if (benchUri != null) benchLabel else "内置 m1_fixture.wav"
+                // 预检：外部 WAV 解码失败就直接终止，不写半截 CSV
+                val probe = try {
+                    AudioIo.decode(this, source)
+                } catch (t: Throwable) {
+                    android.util.Log.e("VoiceStudio", "bench input decode failed: $inputLabel", t)
+                    ui.post { status.text = "解码失败：${t.message ?: t}\n输入：$inputLabel" }
+                    return@thread
+                }
+                val inputSeconds = probe.size.toFloat() / Rvc.SR
+                android.util.Log.i("VoiceStudio", String.format(Locale.US,
+                    "bench input: %s, %.3f s, %d samples", inputLabel, inputSeconds, probe.size))
+                ui.post { status.text = String.format(Locale.US, "准备 %s / %s / %d 线程 · 输入 %.3f s", modelName, ep, threads, inputSeconds) }
                 val csv = File(getExternalFilesDir(null), "m1_report.csv")
                 if (!csv.exists()) csv.writeText("phase,run,model,decoder,threads,load_ms,decode_ms,hubert_ms,rmvpe_ms,index_ms,enc_ms,dec_ms,post_ms,write_ms,total_ms,decoder_device,fallback,temp_c\n")
                 fun record(phase: String, runNo: Int, engine: Rvc, loadMs: Double, decodeMs: Double, writeMs: Double) {
@@ -126,7 +171,7 @@ class M1BenchActivity : Activity() {
                     val engine = Rvc(commonDir, dir, threads, ep, dec, "cpu", allowFallback = false)
                     val load = (System.nanoTime() - t0) / 1e9
                     val td0 = System.nanoTime()
-                    val x = AudioIo.decode(this, Uri.fromFile(fixture))
+                    val x = AudioIo.decode(this, source)
                     val decode = (System.nanoTime() - td0) / 1e9
                     engine.timing.fill(0.0); engine.timing[0] = load; engine.timing[1] = decode
                     val y = engine.convert(x, Rvc.Settings())
@@ -142,7 +187,7 @@ class M1BenchActivity : Activity() {
                 for (i in 1..10) {
                     ui.post { status.text = "热启动 $i/10" }
                     val td0 = System.nanoTime()
-                    val x = AudioIo.decode(this, Uri.fromFile(fixture))
+                    val x = AudioIo.decode(this, source)
                     val decode = (System.nanoTime() - td0) / 1e9
                     engine.timing.fill(0.0); engine.timing[0] = 0.0; engine.timing[1] = decode
                     val y = engine.convert(x, Rvc.Settings())
