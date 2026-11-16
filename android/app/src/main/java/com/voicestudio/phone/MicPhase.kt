@@ -6,6 +6,10 @@ enum class MicPhase { OFF, PREPARING, WAITING, BUFFERING, RUNNING, STOPPING, ERR
             if (stopping && active) return STOPPING
             if (error != null) return ERROR
             if (!active) return OFF
+            // WAV 文件注入没有 BRIDGE_* 行，用它自己的标记判断
+            if (log.contains("source=WAV_loop") || log.contains("READY: start a NEW recording")) {
+                return if (log.contains("STREAM elapsed_s=")) RUNNING else WAITING
+            }
             // STREAM also carries state: long sessions may rotate the original transition out.
             val state = log.lineSequence().lastOrNull {
                 "BRIDGE_IDLE" in it || "READY_WAIT_TARGET" in it || "BRIDGE_BUFFERING" in it ||
