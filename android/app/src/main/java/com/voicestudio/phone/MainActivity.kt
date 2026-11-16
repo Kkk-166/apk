@@ -661,6 +661,34 @@ class MainActivity : Activity() {
         showTimes()
         val scroll = f<ScrollView>(R.id.scroll)
         scroll.post { scroll.smoothScrollTo(0, f<View>(R.id.result).bottom) }
+        autoSaveAndInject()
+    }
+
+    /** Auto-save every conversion; when enabled, hand the MediaStore URI to T10. Never blocks the result. */
+    private fun autoSaveAndInject() {
+        val name = outputName
+        thread {
+            val saved = runCatching { save() }.getOrNull()
+            if (saved == null) {
+                ui.post { toast("自动保存失败，可手动点保存") }
+                return@thread
+            }
+            ui.post { toast("已自动保存：$name") }
+            if (!prefs.getBoolean("auto_inject", false)) return@thread
+            runCatching {
+                startActivity(Intent().apply {
+                    component = android.content.ComponentName("com.dsh.t10", "com.dsh.t10.MainActivity")
+                    data = saved
+                    putExtra("wav_uri", saved.toString())
+                    putExtra("auto_inject", true)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                })
+                ui.post { toast("已请求 T10 注入，请到 T10 确认 READY") }
+            }.onFailure { e ->
+                android.util.Log.w("VoiceStudio", "auto-inject: cannot start T10", e)
+                ui.post { toast("自动注入失败，请手动打开 T10：${e.message ?: e}") }
+            }
+        }
     }
 
     /** Copies the result into Music/VoiceStudio (MediaStore: no storage permission needed). */
@@ -961,6 +989,22 @@ class MainActivity : Activity() {
         })
         threadsBar.progress = hooks.getIntExtra("threads", prefs.getInt("threads", 4)) - 2
         threadsValue.text = "${threadsBar.progress + 2}"
+        // 自动化开关：默认关闭，由用户主动开启（失败不影响转换结果）
+        val autoInjectRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(12), 0, 0)
+        }
+        autoInjectRow.addView(TextView(this).apply {
+            text = "转换后自动保存并交给 T10 注入"
+            textSize = 13f
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        })
+        autoInjectRow.addView(android.widget.Switch(this).apply {
+            isChecked = prefs.getBoolean("auto_inject", false)
+            setOnCheckedChangeListener { _, on -> prefs.edit().putBoolean("auto_inject", on).apply() }
+        })
+        compute.addView(autoInjectRow)
         compute.addView(TextView(this).apply {
             text = str(R.string.ui_device_settings_apply_to_the_next_file)
             textSize = 11f; setTextColor(getColor(R.color.muted)); setPadding(0, dp(10), 0, 0)
