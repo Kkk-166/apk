@@ -59,6 +59,14 @@ class ShizukuMicActivity : Activity() {
     private lateinit var profileHint: TextView
     private lateinit var profile: Switch
     private lateinit var primary: Button
+    private var wavMode = false
+    private var wavPath: String? = null
+    private lateinit var wavCard: LinearLayout
+    private lateinit var wavPick: Button
+    private lateinit var wavHint: TextView
+    private lateinit var modeRealtime: Button
+    private lateinit var modeWav: Button
+    private val PICK_WAV = 1001
     private lateinit var openTarget: Button
     private lateinit var targetCard: LinearLayout
     private lateinit var voiceCard: LinearLayout
@@ -143,6 +151,14 @@ class ShizukuMicActivity : Activity() {
         }
         content.addView(notificationHint)
         content.space(20)
+        val modeRow = row()
+        modeRealtime = button("实时变声") { setWavMode(false) }
+        modeWav = button("文件注入") { setWavMode(true) }
+        modeRow.addView(modeRealtime, LinearLayout.LayoutParams(0, dp(44), 1f))
+        modeRow.addView(View(this), LinearLayout.LayoutParams(dp(8), dp(1)))
+        modeRow.addView(modeWav, LinearLayout.LayoutParams(0, dp(44), 1f))
+        content.addView(modeRow)
+        content.space(10)
         val hero = card(content, getColor(R.color.lavender))
         val statusRow = row()
         statusRow.addView(View(this).apply { background = shape(purple, 8) },
@@ -209,6 +225,14 @@ class ShizukuMicActivity : Activity() {
         }
         targetCard.addView(profile)
         profileHint = text("", 11f, muted); targetCard.addView(profileHint)
+        wavCard = card(content)
+        wavCard.addView(text("文件注入（WAV）", 13f, ink, true))
+        wavCard.space(10)
+        wavPick = button("选择 WAV 文件") { pickWav() }
+        wavCard.addView(wavPick, LinearLayout.LayoutParams(-1, dp(46)))
+        wavHint = text("未选择文件（最长 300 秒）", 11f, muted)
+        wavCard.addView(wavHint)
+        wavCard.visibility = View.GONE
         voiceCard = card(content)
         voiceCard.addView(text(str(R.string.ui_voice_model), 11f, muted, true)); voiceCard.space(8)
         val voiceRow = row().apply { setOnClickListener { chooseModel() }; contentDescription = str(R.string.ui_choose_voice) }
@@ -229,7 +253,8 @@ class ShizukuMicActivity : Activity() {
         scroll.addView(content); root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         val footer = column().apply { setPadding(dp(20), dp(12), dp(20), dp(12)); setBackgroundColor(getColor(R.color.panel)) }
         primary = button(str(R.string.ui_start_virtual_mic), true) {
-            if (ShizukuMicController.active) ShizukuMicController.stop() else begin()
+            if (ShizukuMicController.active) ShizukuMicController.stop()
+            else if (wavMode) beginWav() else begin()
         }
         footer.addView(primary, LinearLayout.LayoutParams(-1, dp(52))); footer.space(8)
         openTarget = button(str(R.string.ui_open_selected_app)) {
@@ -413,7 +438,11 @@ class ShizukuMicActivity : Activity() {
         }
         val seconds = if (active) (SystemClock.elapsedRealtime() - ShizukuMicController.startedAt) / 1000 else 0L
         timer.text = if (active) String.format(Locale.US, "%02d:%02d", seconds / 60, seconds % 60) else ""
-        primary.text = if (active) str(R.string.ui_stop_virtual_mic) else str(R.string.ui_start_virtual_mic)
+        primary.text = when {
+            active -> str(R.string.ui_stop_virtual_mic)
+            wavMode -> "启动 WAV 注入"
+            else -> str(R.string.ui_start_virtual_mic)
+        }
         primary.isEnabled = active || (!VirtualMicSession.isActive && selectedModel.isNotEmpty())
         primary.alpha = if (primary.isEnabled) 1f else .45f
         profile.isEnabled = !active; targetCard.alpha = if (active) .75f else 1f; voiceCard.alpha = 1f
@@ -428,6 +457,69 @@ class ShizukuMicActivity : Activity() {
         showLevel(meter.input, inputBar, inputValue); showLevel(meter.output, outputBar, outputValue)
         metrics.text = str(R.string.ui_processing_ms_ms_block_skipped_inputs_capture, meter.computeMs.toInt(), meter.drops)
     }
+    private fun setWavMode(on: Boolean) {
+        wavMode = on
+        wavCard.visibility = if (on) View.VISIBLE else View.GONE
+        wavPick.isEnabled = !ShizukuMicController.active
+        modeRealtime.alpha = if (on) .45f else 1f
+        modeWav.alpha = if (on) 1f else .45f
+        updateSelection()
+    }
+
+    private fun pickWav() {
+        if (ShizukuMicController.active) return
+        startActivityForResult(
+            Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("audio/*"),
+            PICK_WAV)
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != PICK_WAV || resultCode != RESULT_OK) return
+        val uri = data?.data ?: return
+        wavHint.text = "正在复制所选文件…"
+        thread {
+            val copied = runCatching {
+                val dir = File(getExternalFilesDir(null), "inject").apply { mkdirs() }
+                val out = File(dir, "inject-" + System.currentTimeMillis() + ".wav")
+                contentResolver.openInputStream(uri).use { input ->
+                    requireNotNull(input) { "无法打开所选文件" }
+                    out.outputStream().use { input.copyTo(it) }
+                }
+                out
+            }
+            ui.post {
+                copied.onSuccess {
+                    wavPath = it.absolutePath
+                    wavHint.text = "已选：" + it.name + "（" + (it.length() / 1024) + " KB）"
+                }.onFailure {
+                    wavPath = null
+                    wavHint.text = "复制失败：" + (it.message ?: it.toString())
+                }
+            }
+        }
+    }
+
+    private fun beginWav() {
+        if (ShizukuMicController.active) return
+        val path = wavPath
+        if (path == null) { showError("请先选择 WAV 文件"); return }
+        if (!Shizuku.pingBinder()) { showError(str(R.string.ui_start_shizuku_using_wireless_debugging)); return }
+        if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
+            if (Shizuku.shouldShowRequestPermissionRationale())
+                showError(str(R.string.ui_allow_voice_studio_in_shizuku_s_authorized))
+            else Shizuku.requestPermission(71)
+            return
+        }
+        saveSelection()
+        try {
+            ShizukuMicController.startWav(applicationContext, selectedPackage, path, 60)
+            updateSelection()
+        } catch (e: Throwable) {
+            showError(e.message ?: "启动 WAV 注入失败")
+        }
+    }
+
     private fun begin(skipNotificationPermission: Boolean = false) {
         if (ShizukuMicController.active || VirtualMicSession.isActive) return
         localError = null

@@ -5,6 +5,8 @@ import android.os.Binder
 import android.os.IBinder
 import android.os.Process
 import org.json.JSONObject
+import java.io.File
+import java.io.RandomAccessFile
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
@@ -73,6 +75,130 @@ class VirtualMicUserService(private val context: Context) : IVirtualMicService.S
             return JSONObject().put("error", detail).toString()
         }
         return snapshot()
+    }
+
+    /** WAV 文件注入：复用 dev.virtualmic.Main --wav，不走实时 socket。 */
+    override fun startWav(targetPackage: String, wavPath: String, seconds: Int, owner: IBinder): String {
+        checkCaller()
+        check(Process.myUid() == 2000) { "Start Shizuku with wireless debugging (shell UID 2000)" }
+        require(targetPackage.matches(Regex("[A-Za-z0-9_]+(\\.[A-Za-z0-9_]+)+")))
+        require(seconds in 5..300)
+        val problem = validateWav(wavPath)
+        if (problem != null) {
+            return JSONObject().put("error", "WAV_INVALID: " + problem).toString()
+        }
+        synchronized(this) {
+            check(child?.isAlive != true) { "Microphone session already running" }
+            port = 0
+            synchronized(lines) { lines.clear() }
+            token = "virtual-mic-wav-" + UUID.randomUUID()
+            this.owner = owner
+            owner.linkToDeath(died, 0)
+            val command = mutableListOf(
+                "/system/bin/app_process", "/", "dev.virtualmic.Main",
+                "--package", targetPackage, "--wav", wavPath,
+                "--seconds", seconds.toString(), "--watch-parent"
+            )
+            val builder = ProcessBuilder(command).redirectErrorStream(true)
+            builder.environment()["CLASSPATH"] = context.applicationInfo.sourceDir
+            try {
+                val process = builder.start()
+                child = process
+                logReader = thread(name = "virtual-mic-wav-log") {
+                    process.inputStream.bufferedReader().useLines { stream ->
+                        stream.forEach { line ->
+                            synchronized(lines) { lines.addLast(line); while (lines.size > 700) lines.removeFirst() }
+                        }
+                    }
+                }
+            } catch (e: Throwable) {
+                owner.unlinkToDeath(died, 0); this.owner = null
+                throw e
+            }
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+            while (child?.isAlive == true && System.nanoTime() < deadline) {
+                val ready = synchronized(lines) { lines.any { it.contains("READY") } }
+                if (ready) break
+                Thread.sleep(50)
+            }
+            return snapshot()
+        }
+    }
+
+    /** 按 shell 身份（本进程 uid=2000）实际打开文件，按 RIFF chunk 校验，不假设 44 字节头。 */
+    private fun validateWav(path: String): String? {
+        if (!Regex("^/[A-Za-z0-9_./-]+$").matches(path)) return "bad path"
+        val file = File(path)
+        if (!file.isFile) return "not found"
+        if (!file.canRead()) return "not readable"
+        if (file.length() < 44L || file.length() > 100L * 1024 * 1024) return "bad size"
+        return try {
+            RandomAccessFile(file, "r").use { raf ->
+                val total = raf.length()
+                fun fourCC(): String {
+                    val b = ByteArray(4); raf.readFully(b); return String(b, Charsets.US_ASCII)
+                }
+                fun u16(): Int {
+                    val b = ByteArray(2); raf.readFully(b)
+                    return (b[0].toInt() and 0xFF) or ((b[1].toInt() and 0xFF) shl 8)
+                }
+                fun u32(): Long {
+                    val b = ByteArray(4); raf.readFully(b)
+                    return (b[0].toLong() and 0xFF) or ((b[1].toLong() and 0xFF) shl 8) or
+                        ((b[2].toLong() and 0xFF) shl 16) or ((b[3].toLong() and 0xFF) shl 24)
+                }
+                if (fourCC() != "RIFF") return "not RIFF"
+                val riffSize = u32()
+                val riffEnd = 8L + riffSize
+                if (riffEnd > total) return "truncated RIFF"
+                if (fourCC() != "WAVE") return "not WAVE"
+                var fmtOk = false
+                var channels = 0
+                var rate = 0
+                var align = 0
+                var dataStart = -1L
+                var dataSize = 0L
+                while (raf.filePointer + 8 <= riffEnd) {
+                    val id = fourCC()
+                    val len = u32()
+                    val body = raf.filePointer
+                    val next = body + len + (len and 1L)
+                    if (next > riffEnd) return "truncated chunk " + id
+                    if (id == "fmt ") {
+                        if (fmtOk || len < 16) return "bad fmt"
+                        val encoding = u16()
+                        channels = u16()
+                        rate = u32().toInt()
+                        u32()
+                        align = u16()
+                        val bits = u16()
+                        if (encoding != 1 || bits != 16 || (channels != 1 && channels != 2) ||
+                            rate < 8000 || rate > 48000 || align != channels * 2) {
+                            return "unsupported fmt (PCM16 mono/stereo 8-48 kHz)"
+                        }
+                        fmtOk = true
+                    } else if (id == "data") {
+                        if (dataStart >= 0) return "multiple data chunks"
+                        dataStart = body
+                        dataSize = len
+                        if (body + len > total) return "data beyond EOF"
+                        if (len == 0L) return "empty data"
+                        if (channels > 0 && len % (channels * 2L) != 0L) return "unaligned data"
+                    }
+                    raf.seek(next)
+                }
+                if (!fmtOk || dataStart < 0) return "missing fmt/data"
+                if (channels <= 0) return "bad channels"
+                val bytesPerSecond = rate.toLong() * channels * 2L
+                val seconds = dataSize.toDouble() / bytesPerSecond
+                if (seconds < 0.5 || seconds > 300.0) {
+                    return "bad duration " + String.format(java.util.Locale.US, "%.2f", seconds) + " s"
+                }
+                null
+            }
+        } catch (t: Throwable) {
+            "read failed: " + t.message
+        }
     }
 
     override fun snapshot(): String {

@@ -124,6 +124,75 @@ object ShizukuMicController {
         }
     }
 
+    /** WAV 文件注入：只走 UserService + dev.virtualmic --wav，不启动实时转换器。 */
+    @Synchronized fun startWav(context: Context, target: String, wavPath: String, seconds: Int) {
+        check(!active && !VirtualMicSession.isActive && !LiveSession.running)
+        check(Shizuku.pingBinder() && Shizuku.checkSelfPermission() == 0)
+        check(Shizuku.getUid() == 2000) { str(R.string.ui_start_shizuku_using_wireless_debugging_2) }
+        val app = context.applicationContext
+        active = true
+        targetPackage = target
+        modelName = "WAV"
+        otherProfile = false
+        allApps = false
+        cellular = false
+        startedAt = android.os.SystemClock.elapsedRealtime()
+        error = null
+        val cancel = AtomicBoolean(false)
+        cancelled = cancel
+        userStopped = AtomicBoolean(false)
+        status = str(R.string.ui_preparing_the_microphone_with_shizuku)
+        shellLog = ""
+        val ready = CountDownLatch(1)
+        val owner = Binder()
+        val args = Shizuku.UserServiceArgs(ComponentName(app, VirtualMicUserService::class.java))
+            .daemon(false).processNameSuffix("virtual_mic_service").debuggable(false).version(5)
+        val connection = object : ServiceConnection {
+            override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+                if (binder != null) remote = IVirtualMicService.Stub.asInterface(binder)
+                ready.countDown()
+            }
+            override fun onServiceDisconnected(name: ComponentName?) {
+                remote = null
+                if (active) { status = str(R.string.ui_shizuku_disconnected); cancel.set(true) }
+                ready.countDown()
+            }
+        }
+        try { Shizuku.bindUserService(args, connection) }
+        catch (e: Throwable) { active = false; throw e }
+        thread(name = "shizuku-mic-wav") {
+            val log = File(app.getExternalFilesDir(null), "virtual_mic/wav-${System.currentTimeMillis()}.log")
+            log.parentFile?.mkdirs()
+            try {
+                check(ready.await(20, TimeUnit.SECONDS)) { str(R.string.ui_shizuku_service_connection_timed_out) }
+                if (cancel.get()) return@thread
+                val service = remote ?: error(str(R.string.ui_could_not_connect_to_the_shizuku_service))
+                val state = JSONObject(service.startWav(target, wavPath, seconds, owner))
+                if (state.has("error")) error = state.getString("error")
+                shellLog = state.getString("log")
+                if (error == null) status = "WAV 注入中，请在 QQ 按住说话"
+                while (!cancel.get()) {
+                    Thread.sleep(500)
+                    val next = JSONObject(service.snapshot())
+                    shellLog = next.getString("log")
+                    if (!next.getBoolean("running")) break
+                }
+                if (error == null) status = "WAV 注入已结束"
+            } catch (e: Throwable) {
+                if (!cancel.get()) error = readableError(e.message ?: str(R.string.ui_check_the_connection))
+                status = if (cancel.get()) str(R.string.ui_virtual_microphone_is_off_2) else str(R.string.ui_could_not_start_3, e.message)
+                android.util.Log.e("ShizukuMic", status, e)
+            } finally {
+                runCatching { remote?.stopMic(userStopped.get()) }
+                runCatching { remote?.snapshot()?.let { shellLog = JSONObject(it).getString("log") } }
+                runCatching { log.writeText(shellLog + "\nAPP_STATUS: " + status) }
+                runCatching { Shizuku.unbindUserService(args, connection, true) }
+                remote = null
+                active = false
+            }
+        }
+    }
+
     fun stop() {
         userStopped.set(true)
         cancelled.set(true)
