@@ -122,6 +122,9 @@ object SendOrchestrator {
                     fail("注入未就绪：" + ShizukuMicController.status)
                     return@thread
                 }
+                // 安全确认：把当前 QQ 聊天标题显示出来，供用户核对
+                val title = runCatching { service.currentChatTitle() }.getOrNull()
+                message = "发送到「" + (title ?: "未知聊天") + "」"
                 val point = service.findVoiceButton()
                 if (point == null) {
                     fail("找不到 QQ 语音按钮：请先打开 QQ 聊天并切到按住说话")

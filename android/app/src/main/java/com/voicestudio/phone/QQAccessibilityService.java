@@ -71,6 +71,45 @@ public class QQAccessibilityService extends AccessibilityService {
         return root;
     }
 
+    /** QQ 聊天页顶部的标题（联系人名）；找不到返回 null。 */
+    public String currentChatTitle() {
+        AccessibilityNodeInfo root = findQQRoot();
+        if (root == null) return null;
+        int limit = dp(260);
+        String best = null;
+        int bestLen = 0;
+        ArrayDeque<AccessibilityNodeInfo> queue = new ArrayDeque<>();
+        queue.add(root);
+        while (!queue.isEmpty()) {
+            AccessibilityNodeInfo n = queue.poll();
+            if (n == null) continue;
+            try {
+                if (n.isVisibleToUser()) {
+                    CharSequence txt = n.getText();
+                    if (txt != null && txt.length() > 0) {
+                        Rect r = new Rect();
+                        n.getBoundsInScreen(r);
+                        String value = txt.toString().trim();
+                        if (r.top >= 0 && r.top < limit && r.width() > dp(100)
+                                && value.length() > bestLen && value.length() <= 24
+                                && !value.equals("发送") && !value.equals("取消")
+                                && !value.equals("返回") && !value.equals("更多")) {
+                            best = value;
+                            bestLen = value.length();
+                        }
+                    }
+                }
+                for (int i = 0; i < n.getChildCount(); i++) queue.add(n.getChild(i));
+            } catch (Throwable ignored) {
+            }
+        }
+        return best;
+    }
+
+    private int dp(int n) {
+        return (int) (n * getResources().getDisplayMetrics().density + 0.5f);
+    }
+
     public String dumpTree(String tag) {
         AccessibilityNodeInfo root = findQQRoot();
         if (root == null) return "NO_ROOT";
