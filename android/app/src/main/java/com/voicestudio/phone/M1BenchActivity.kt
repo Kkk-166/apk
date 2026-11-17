@@ -93,16 +93,20 @@ class M1BenchActivity : Activity() {
         if (models.isEmpty()) { status.text = "没有模型"; return }
         val modelName = models[modelSpinner.selectedItemPosition.coerceIn(0, models.size - 1)]
         val dir = File(modelsDir, modelName)
-        val dumpDir = File(getExternalFilesDir(null), "m1c").apply { deleteRecursively(); mkdirs() }
+        val dumpDir = File(getExternalFilesDir(null), "diag").apply { deleteRecursively(); mkdirs() }
         runButton.isEnabled = false; dumpButton.isEnabled = false
-        status.text = "导出中间特征：$modelName / CPU / pitch=0 formant=0"
+        // 与正式链路一致：pitch 12 / formant 0.4 / 4 线程 / allowFallback = true
+        val settings = Rvc.Settings(pitch = 12.0, formant = 0.4, rmsMixRate = 1.0)
+        status.text = "导出中间特征：$modelName / CPU / pitch=12 formant=0.4 / allowFallback"
         thread {
             val fixture = File(cacheDir, "m1_fixture.wav")
             try {
                 assets.open("m1_fixture.wav").use { i -> fixture.outputStream().use { o -> i.copyTo(o) } }
-                val engine = Rvc(commonDir, dir, 8, "cpu", "model.dec.onnx", "cpu", allowFallback = false, dumpDir = dumpDir)
-                val x = AudioIo.decode(this, Uri.fromFile(fixture))
-                val y = engine.convert(x, Rvc.Settings())
+                val source = benchUri?.let { runCatching { AudioIo.decode(this, it) }.getOrNull() }
+                    ?: AudioIo.decode(this, Uri.fromFile(fixture))
+                val engine = Rvc(commonDir, dir, 4, "cpu", "model.dec.onnx", "cpu", allowFallback = true, dumpDir = dumpDir)
+                val x = source
+                val y = engine.convert(x, settings)
                 AudioIo.writeWav(File(dumpDir, "android_output.wav"), y)
                 engine.close()
                 ui.post { status.text = "DONE: ${dumpDir.absolutePath}\n${dumpDir.listFiles()?.joinToString { it.name }}" }

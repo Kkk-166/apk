@@ -1,7 +1,7 @@
 name: build-apk
 on:
   push:
-    branches: [main, feat/wav-inject, feat/floating-send]
+    branches: [main, feat/wav-inject, feat/floating-send, feat/diag-dump]
   workflow_dispatch:
 permissions:
   contents: write
