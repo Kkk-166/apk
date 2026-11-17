@@ -29,11 +29,14 @@ object SendOrchestrator {
 
     private const val TARGET_PACKAGE = "com.tencent.mobileqq"
 
+    @Volatile private var cancelled = false
+
     private var recorder: Recorder? = null
     private var startedAt = 0L
 
     @Synchronized fun startRecording(context: Context) {
         if (state == State.RECORDING || state == State.CONVERTING) return
+        cancelled = false
         val app = context.applicationContext
         val r = Recorder(app)
         recorder = r
@@ -58,10 +61,21 @@ object SendOrchestrator {
         val x = r.stop()
         val seconds = x.size.toFloat() / Rvc.SR
         if (seconds < 0.3f) { fail("录音太短"); return }
+        cancelled = false
         state = State.CONVERTING
-        message = "转换中…"
+        message = "转换中…（点一下可停止）"
         val app = context.applicationContext
         thread(name = "float-convert") { convert(app, x) }
+    }
+
+    /** 转换中取消：立即回到空闲；后台转换跑完也会丢弃结果。 */
+    fun cancel() {
+        cancelled = true
+        if (state == State.CONVERTING || state == State.INJECTING) {
+            state = State.IDLE
+            message = ""
+            convertedPath = null
+        }
     }
 
     fun reset() {
@@ -130,6 +144,7 @@ object SendOrchestrator {
                 engine.close()
             }
             convertSeconds = (System.currentTimeMillis() - started) / 1000.0
+            if (cancelled) return
             // 1) 公共可见副本（Music/VoiceStudio）
             publicName = runCatching { savePublic(context, y) }.getOrNull()
             // 2) 注入副本：尾部补 300 ms 静音，吸收录音检测延迟
@@ -141,6 +156,7 @@ object SendOrchestrator {
             AudioIo.writeWav(out, inject)
             convertedPath = out.absolutePath
             injectDuration = WavInfo.durationSeconds(out) ?: 0.0
+            if (cancelled) return
             // 3) 启动内置 WAV 注入（P2 不自动按住，用户手动切 QQ）
             state = State.INJECTING
             message = "注入准备中…"

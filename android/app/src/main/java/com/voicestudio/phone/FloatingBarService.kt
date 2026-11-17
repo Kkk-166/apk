@@ -132,7 +132,13 @@ class FloatingBarService : Service() {
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     val st = SendOrchestrator.state
-                    if (st != SendOrchestrator.State.RECORDING && st != SendOrchestrator.State.CONVERTING) {
+                    if (st == SendOrchestrator.State.CONVERTING) {
+                        SendOrchestrator.cancel()
+                        true
+                    } else if (st == SendOrchestrator.State.INJECTING) {
+                        SendOrchestrator.reset()
+                        true
+                    } else if (st != SendOrchestrator.State.RECORDING) {
                         // FAILED / READY 状态下再按一次即可重新开始，不会卡死
                         SendOrchestrator.reset()
                         recording = true
@@ -160,8 +166,8 @@ class FloatingBarService : Service() {
             label.text = when (s.state) {
                 SendOrchestrator.State.IDLE -> "按住说话"
                 SendOrchestrator.State.RECORDING -> "● 录音中 " + s.recordSeconds + " s"
-                SendOrchestrator.State.CONVERTING -> "转换中…"
-                SendOrchestrator.State.INJECTING -> "注入准备中…"
+                SendOrchestrator.State.CONVERTING -> "转换中…（点一下停止）"
+                SendOrchestrator.State.INJECTING -> "注入准备中…（点一下停止）"
                 SendOrchestrator.State.READY -> "注入中"
                 SendOrchestrator.State.FAILED -> "失败"
             }
