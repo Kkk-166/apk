@@ -138,6 +138,14 @@ class FloatingBarService : Service() {
                     } else if (st == SendOrchestrator.State.INJECTING) {
                         SendOrchestrator.reset()
                         true
+                    } else if (st == SendOrchestrator.State.READY) {
+                        SendOrchestrator.sendToQq(this@FloatingBarService)
+                        true
+                    } else if (st == SendOrchestrator.State.DONE) {
+                        SendOrchestrator.reset()
+                        true
+                    } else if (st == SendOrchestrator.State.SENDING) {
+                        false
                     } else if (st != SendOrchestrator.State.RECORDING) {
                         // FAILED / READY 状态下再按一次即可重新开始，不会卡死
                         SendOrchestrator.reset()
@@ -168,7 +176,9 @@ class FloatingBarService : Service() {
                 SendOrchestrator.State.RECORDING -> "● 录音中 " + s.recordSeconds + " s"
                 SendOrchestrator.State.CONVERTING -> "转换中…（点一下停止）"
                 SendOrchestrator.State.INJECTING -> "注入准备中…（点一下停止）"
-                SendOrchestrator.State.READY -> "注入中"
+                SendOrchestrator.State.READY -> "准备发送"
+                SendOrchestrator.State.SENDING -> "发送中…"
+                SendOrchestrator.State.DONE -> "已发送"
                 SendOrchestrator.State.FAILED -> "失败"
             }
             hint.text = when (s.state) {
@@ -176,14 +186,18 @@ class FloatingBarService : Service() {
                 SendOrchestrator.State.RECORDING -> "松开开始转换"
                 SendOrchestrator.State.CONVERTING -> "请稍候"
                 SendOrchestrator.State.INJECTING -> "正在连接注入服务"
-                SendOrchestrator.State.READY -> "去 QQ 按住说话，再按一次可重录"
+                SendOrchestrator.State.READY -> "点一下发送到 QQ（先打开聊天）"
+                SendOrchestrator.State.SENDING -> "请勿切换应用"
+                SendOrchestrator.State.DONE -> s.message + "，点一下重新开始"
                 SendOrchestrator.State.FAILED -> s.message + "，再按一次重试"
             }
             hold.text = when (s.state) {
                 SendOrchestrator.State.RECORDING -> "松开发送录音"
                 SendOrchestrator.State.CONVERTING -> "转换中…"
                 SendOrchestrator.State.INJECTING -> "注入准备中…"
-                SendOrchestrator.State.READY -> "注入中，去 QQ 按住"
+                SendOrchestrator.State.READY -> "点击发送"
+                SendOrchestrator.State.SENDING -> "发送中…"
+                SendOrchestrator.State.DONE -> "已发送"
                 else -> "按住录音"
             }
             ui.postDelayed(this, 250)

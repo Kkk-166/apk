@@ -17,7 +17,7 @@ import kotlin.concurrent.thread
  * P2 起在转换完成后接内置 WAV 注入，P3 再接无障碍自动发送。
  */
 object SendOrchestrator {
-    enum class State { IDLE, RECORDING, CONVERTING, INJECTING, READY, FAILED }
+    enum class State { IDLE, RECORDING, CONVERTING, INJECTING, READY, SENDING, DONE, FAILED }
 
     @Volatile var state = State.IDLE; private set
     @Volatile var message = ""; private set
@@ -79,7 +79,8 @@ object SendOrchestrator {
     }
 
     fun reset() {
-        if (state == State.READY || state == State.FAILED || state == State.INJECTING) {
+        if (state == State.READY || state == State.FAILED || state == State.INJECTING ||
+            state == State.SENDING || state == State.DONE) {
             runCatching { ShizukuMicController.stop() }
             state = State.IDLE
             message = ""
@@ -114,6 +115,40 @@ object SendOrchestrator {
         } catch (t: Throwable) {
             android.util.Log.e("SendOrchestrator", "inject failed", t)
             fail("注入失败：" + (t.message ?: t.toString()))
+        }
+    }
+
+    /** 用户确认后：无障碍长按 QQ 语音键，时长 = 注入 WAV 时长。 */
+    fun sendToQq(context: Context) {
+        if (state != State.READY) return
+        val service = QQAccessibilityService.getInstance()
+        if (service == null) {
+            fail("无障碍服务未开启：请在系统设置里启用 VoiceStudio 的无障碍")
+            return
+        }
+        state = State.SENDING
+        message = "发送中…"
+        thread(name = "float-send") {
+            try {
+                val point = service.findVoiceButton()
+                if (point == null) {
+                    fail("找不到 QQ 语音按钮：请先打开 QQ 聊天并切到按住说话")
+                    return@thread
+                }
+                val ms = (injectDuration * 1000.0).toLong().coerceIn(1000L, 60_000L)
+                val ok = service.longPress(point[0], point[1], ms)
+                if (!ok) {
+                    fail("长按失败：无障碍手势被拒绝")
+                    return@thread
+                }
+                // 等手势结束（长按时长 + 缓冲）
+                Thread.sleep(ms + 500)
+                state = State.DONE
+                message = "已发送 %.1f s".format(injectDuration)
+            } catch (t: Throwable) {
+                android.util.Log.e("SendOrchestrator", "send failed", t)
+                fail("发送失败：" + (t.message ?: t.toString()))
+            }
         }
     }
 

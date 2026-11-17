@@ -384,4 +384,5 @@
     <string name="ui_apply_restart">应用并重启</string>
     <string name="ui_restart_after_stopping">等待麦克风停止后，再重新启动。</string>
     <string name="ui_live_per_voice_help">输出增益和时序设置会为每个音色分别保存，并与其虚拟麦克风设置共用。</string>
+    <string name="accessibility_description">让 VoiceStudio 在 QQ 里自动按住语音键，把变声后的语音发送出去。</string>
 </resources>

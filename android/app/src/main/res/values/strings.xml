@@ -384,4 +384,5 @@
     <string name="ui_apply_restart">Apply and restart</string>
     <string name="ui_restart_after_stopping">Wait for the microphone to stop, then start it again.</string>
     <string name="ui_live_per_voice_help">Output gain and timing settings are saved separately for each voice and shared with its virtual mic settings.</string>
+    <string name="accessibility_description">Lets Voice Studio press the QQ voice button to send the converted audio.</string>
 </resources>
