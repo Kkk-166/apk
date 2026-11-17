@@ -40,6 +40,8 @@ class Rvc(commonDir: File, private val modelDir: File, private val threads: Int 
           /** Diagnosis: ORT profiles of the NPU sessions (which device ran each node) go here as <model>_*.json. */
           private val profileDir: File? = null,
           private val allowFallback: Boolean = false,
+          /** 实验：这些 10 ms 帧强制 f0=0（用于验证误检瞬态） */
+          private val forceZeroF0Frames: IntArray? = null,
           /** M1c: write raw intermediate tensors here, once per name. */
           private val dumpDir: File? = null) : AutoCloseable {
     /** A realtime step: [block] new frames, the last [tail] frames of the window decoded (block + crossfade + search). */
@@ -346,6 +348,7 @@ class Rvc(commonDir: File, private val modelDir: File, private val threads: Int 
         }
         clock.lap(3)
         dump("f0_raw", FloatArray(pLen) { f0[it].toFloat() }, intArrayOf(pLen))
+        forceZeroF0Frames?.forEach { if (it in f0.indices) f0[it] = 0.0 }
         f0 = Dsp.fillUnvoiced(f0, if (st.unvoicedKeep) UNVOICED_FILL_FRAMES else null)
         f0 = Dsp.shapePitch(f0, st.lowKnee, st.lowRatio, st.highKnee, st.highRatio,
             INTONATION_CENTER_HZ, if (st.expand) st.expandRatio else 1.0)
