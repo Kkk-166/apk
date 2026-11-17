@@ -107,6 +107,13 @@ object SendOrchestrator {
             try {
                 // 先启动注入并等 READY，再按住 QQ，保证 WAV 从第 0 帧开始（开头静音吸收延迟）
                 ShizukuMicController.startWav(context, TARGET_PACKAGE, path, 60)
+                // startWav 是异步的：轮询 shellLog 直到 READY（绑定 20 s + 注册 10 s 内）
+                var waited = 0
+                while (waited < 90_000 && !ShizukuMicController.shellLog.contains("READY")) {
+                    if (!ShizukuMicController.active) break
+                    Thread.sleep(100)
+                    waited += 100
+                }
                 if (!ShizukuMicController.active) {
                     fail(ShizukuMicController.error ?: "注入未启动")
                     return@thread
