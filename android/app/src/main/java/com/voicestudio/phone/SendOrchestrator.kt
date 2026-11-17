@@ -147,6 +147,13 @@ object SendOrchestrator {
         }
     }
 
+    /** 只保留最近 3 个注入 WAV，其余删除（避免长期累积）。 */
+    private fun pruneFloatDir(dir: File) {
+        val files = dir.listFiles { f -> f.name.endsWith(".wav") }
+            ?.sortedByDescending { it.lastModified() } ?: return
+        files.drop(3).forEach { runCatching { it.delete() } }
+    }
+
     /** 写一份到 Music/VoiceStudio，用户可见；失败不影响注入。 */
     private fun savePublic(context: Context, y: FloatArray): String? {
         val name = "float-" + SimpleDateFormat("MMdd_HHmm", Locale.US).format(Date())
@@ -183,6 +190,7 @@ object SendOrchestrator {
             val inject = FloatArray(y.size + padHead + padTail)
             System.arraycopy(y, 0, inject, padHead, y.size)
             val outDir = File(base, "float").apply { mkdirs() }
+            pruneFloatDir(outDir)
             val out = File(outDir, "inject-" + System.currentTimeMillis() + ".wav")
             AudioIo.writeWav(out, inject)
             convertedPath = out.absolutePath
