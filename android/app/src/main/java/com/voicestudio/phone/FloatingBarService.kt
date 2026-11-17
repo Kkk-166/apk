@@ -161,19 +161,23 @@ class FloatingBarService : Service() {
                 SendOrchestrator.State.IDLE -> "按住说话"
                 SendOrchestrator.State.RECORDING -> "● 录音中 " + s.recordSeconds + " s"
                 SendOrchestrator.State.CONVERTING -> "转换中…"
-                SendOrchestrator.State.READY -> "转换完成"
+                SendOrchestrator.State.INJECTING -> "注入准备中…"
+                SendOrchestrator.State.READY -> "注入中"
                 SendOrchestrator.State.FAILED -> "失败"
             }
             hint.text = when (s.state) {
                 SendOrchestrator.State.IDLE -> "松开后自动转换"
                 SendOrchestrator.State.RECORDING -> "松开开始转换"
                 SendOrchestrator.State.CONVERTING -> "请稍候"
-                SendOrchestrator.State.READY -> s.message + "，再按一次可重录"
+                SendOrchestrator.State.INJECTING -> "正在连接注入服务"
+                SendOrchestrator.State.READY -> "去 QQ 按住说话，再按一次可重录"
                 SendOrchestrator.State.FAILED -> s.message + "，再按一次重试"
             }
             hold.text = when (s.state) {
                 SendOrchestrator.State.RECORDING -> "松开发送录音"
                 SendOrchestrator.State.CONVERTING -> "转换中…"
+                SendOrchestrator.State.INJECTING -> "注入准备中…"
+                SendOrchestrator.State.READY -> "注入中，去 QQ 按住"
                 else -> "按住录音"
             }
             ui.postDelayed(this, 250)

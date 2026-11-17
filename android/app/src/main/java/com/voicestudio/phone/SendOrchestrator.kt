@@ -1,9 +1,15 @@
 package com.voicestudio.phone
 
+import android.content.ContentValues
 import android.content.Context
+import android.os.Environment
 import android.os.SystemClock
+import android.provider.MediaStore
 import org.json.JSONObject
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.concurrent.thread
 
 /**
@@ -11,13 +17,17 @@ import kotlin.concurrent.thread
  * P2 起在转换完成后接内置 WAV 注入，P3 再接无障碍自动发送。
  */
 object SendOrchestrator {
-    enum class State { IDLE, RECORDING, CONVERTING, READY, FAILED }
+    enum class State { IDLE, RECORDING, CONVERTING, INJECTING, READY, FAILED }
 
     @Volatile var state = State.IDLE; private set
     @Volatile var message = ""; private set
     @Volatile var recordSeconds = 0; private set
     @Volatile var convertedPath: String? = null; private set
     @Volatile var convertSeconds = 0.0; private set
+    @Volatile var publicName: String? = null; private set
+    @Volatile var injectDuration = 0.0; private set
+
+    private const val TARGET_PACKAGE = "com.tencent.mobileqq"
 
     private var recorder: Recorder? = null
     private var startedAt = 0L
@@ -55,13 +65,55 @@ object SendOrchestrator {
     }
 
     fun reset() {
-        if (state == State.READY || state == State.FAILED) {
+        if (state == State.READY || state == State.FAILED || state == State.INJECTING) {
+            runCatching { ShizukuMicController.stop() }
             state = State.IDLE
             message = ""
             convertedPath = null
             recordSeconds = 0
             convertSeconds = 0.0
+            publicName = null
+            injectDuration = 0.0
         }
+    }
+
+    /** 启动注入并等待 READY；失败明确上报，不误报成功。 */
+    private fun startInjection(context: Context, path: String) {
+        try {
+            ShizukuMicController.startWav(context, TARGET_PACKAGE, path, 60)
+            var waited = 0
+            while (waited < 20_000 && !ShizukuMicController.shellLog.contains("READY")) {
+                if (!ShizukuMicController.active) break
+                Thread.sleep(100)
+                waited += 100
+            }
+            if (!ShizukuMicController.active) {
+                fail(ShizukuMicController.error ?: "注入未启动")
+                return
+            }
+            if (!ShizukuMicController.shellLog.contains("READY")) {
+                fail("注入未就绪：" + ShizukuMicController.status)
+                return
+            }
+            state = State.READY
+            message = "注入中 %.1f s，去 QQ 按住说话".format(injectDuration)
+        } catch (t: Throwable) {
+            android.util.Log.e("SendOrchestrator", "inject failed", t)
+            fail("注入失败：" + (t.message ?: t.toString()))
+        }
+    }
+
+    /** 写一份到 Music/VoiceStudio，用户可见；失败不影响注入。 */
+    private fun savePublic(context: Context, y: FloatArray): String? {
+        val name = "float-" + SimpleDateFormat("MMdd_HHmm", Locale.US).format(Date())
+        val values = ContentValues().apply {
+            put(MediaStore.Audio.Media.DISPLAY_NAME, "$name.wav")
+            put(MediaStore.Audio.Media.MIME_TYPE, "audio/wav")
+            put(MediaStore.Audio.Media.RELATIVE_PATH, Environment.DIRECTORY_MUSIC + "/VoiceStudio")
+        }
+        val uri = context.contentResolver.insert(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, values) ?: return null
+        context.contentResolver.openOutputStream(uri)?.use { AudioIo.writeWav(it, y) }
+        return "$name.wav"
     }
 
     private fun convert(context: Context, x: FloatArray) {
@@ -78,12 +130,21 @@ object SendOrchestrator {
                 engine.close()
             }
             convertSeconds = (System.currentTimeMillis() - started) / 1000.0
+            // 1) 公共可见副本（Music/VoiceStudio）
+            publicName = runCatching { savePublic(context, y) }.getOrNull()
+            // 2) 注入副本：尾部补 300 ms 静音，吸收录音检测延迟
+            val pad = (Rvc.SR * 0.3).toInt()
+            val inject = FloatArray(y.size + pad)
+            System.arraycopy(y, 0, inject, 0, y.size)
             val outDir = File(base, "float").apply { mkdirs() }
-            val out = File(outDir, "float-" + System.currentTimeMillis() + ".wav")
-            AudioIo.writeWav(out, y)
+            val out = File(outDir, "inject-" + System.currentTimeMillis() + ".wav")
+            AudioIo.writeWav(out, inject)
             convertedPath = out.absolutePath
-            state = State.READY
-            message = "转换完成 %.1f s".format(convertSeconds)
+            injectDuration = WavInfo.durationSeconds(out) ?: 0.0
+            // 3) 启动内置 WAV 注入（P2 不自动按住，用户手动切 QQ）
+            state = State.INJECTING
+            message = "注入准备中…"
+            thread(name = "float-inject") { startInjection(context, out.absolutePath) }
         } catch (t: Throwable) {
             android.util.Log.e("SendOrchestrator", "convert failed", t)
             fail("转换失败：" + (t.message ?: t.toString()))
