@@ -5,6 +5,7 @@ import android.app.AlertDialog
 import android.content.ContentValues
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.Manifest
 import android.graphics.Typeface
 import android.net.Uri
 import android.os.Bundle
@@ -13,6 +14,7 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.DocumentsContract
 import android.provider.MediaStore
+import android.provider.Settings
 import android.provider.OpenableColumns
 import android.text.SpannableStringBuilder
 import android.text.style.ForegroundColorSpan
@@ -455,6 +457,21 @@ class MainActivity : Activity() {
     }
 
     private fun currentModel(): File? = models.getOrNull(f<Spinner>(R.id.model).selectedItemPosition)
+
+    /** 悬浮窗变声入口：依次要求「显示在其他应用上层」和录音权限。 */
+    private fun startFloatingBar() {
+        if (!Settings.canDrawOverlays(this)) {
+            startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+            toast("请先允许「显示在其他应用上层」，再回来点一次")
+            return
+        }
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 80)
+            return
+        }
+        startForegroundService(Intent(this, FloatingBarService::class.java))
+        toast("悬浮窗已开启：回到 QQ 长按录音")
+    }
 
     private fun settingsJson(dir: File): JSONObject =
         File(dir, "settings.json").let { if (it.isFile) runCatching { JSONObject(it.readText()) }.getOrDefault(JSONObject()) else JSONObject() }
@@ -965,6 +982,10 @@ class MainActivity : Activity() {
             text = str(R.string.ui_device_settings_apply_to_the_next_file)
             textSize = 11f; setTextColor(getColor(R.color.muted)); setPadding(0, dp(10), 0, 0)
         })
+        compute.addView(Button(this).apply {
+            text = "悬浮窗变声（在 QQ 里长按录音）"
+            setOnClickListener { startFloatingBar() }
+        }, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(8) })
         // records
         val records = card(page)
         records.addView(TextView(this).apply { text = str(R.string.ui_diagnostics); textSize = 13f; setTypeface(typeface, Typeface.BOLD) })
