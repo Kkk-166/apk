@@ -102,9 +102,13 @@ abstract class PcmSource implements Closeable {
 
         @Override void fill(short[] samples) throws IOException {
             if (samples.length % channels != 0) throw new IOException("Unaligned sample buffer");
+            // 只播一遍：到 data 末尾后输出静音，不回绕（避免循环导致接收端听到重复）
             for (int i = 0; i < samples.length; i++) {
-                if (file.getFilePointer() >= dataEnd) file.seek(dataStart);
-                samples[i] = (short) uint16(file);
+                if (file.getFilePointer() >= dataEnd) {
+                    samples[i] = 0;
+                } else {
+                    samples[i] = (short) uint16(file);
+                }
             }
         }
 

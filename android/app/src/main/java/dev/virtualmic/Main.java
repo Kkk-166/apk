@@ -209,6 +209,8 @@ public final class Main {
                 } else {
                     log("READY: start a NEW recording in the target app now");
                     log("Policy/track success alone does NOT prove the target receives injected audio");
+                    // 等目标应用真正开始录音后才从 WAV 第 0 帧播放，避免错位
+                    if (options.seconds != 0) MicRelay.awaitTarget(session.track, session.manager, targetUid);
                     stage = "stream";
                     stream(session.track, source, options.seconds);
                 }

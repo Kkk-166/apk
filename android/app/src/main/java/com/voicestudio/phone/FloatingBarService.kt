@@ -29,6 +29,7 @@ class FloatingBarService : Service() {
     private lateinit var label: TextView
     private lateinit var hint: TextView
     private lateinit var hold: TextView
+    private lateinit var stop: TextView
     private val ui = Handler(Looper.getMainLooper())
     private var recording = false
     private var dragStartX = 0f
@@ -64,16 +65,40 @@ class FloatingBarService : Service() {
                 setStroke(dp(1), 0x66A78BFA)
             }
         }
-        // 拖动把手
+        // 顶部行：整行拖动区 + 停止按钮
+        val topRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
         val handle = View(this).apply {
             background = GradientDrawable().apply {
                 setColor(0x55A78BFA)
-                cornerRadius = dp(3).toFloat()
+                cornerRadius = dp(6).toFloat()
             }
-            layoutParams = LinearLayout.LayoutParams(dp(52), dp(5)).apply {
-                gravity = Gravity.CENTER_HORIZONTAL; bottomMargin = dp(8)
+            layoutParams = LinearLayout.LayoutParams(0, dp(22), 1f)
+        }
+        stop = TextView(this).apply {
+            text = "停止"
+            setTextColor(Color.WHITE)
+            textSize = 11f
+            gravity = Gravity.CENTER
+            setPadding(dp(10), 0, dp(10), 0)
+            background = GradientDrawable().apply {
+                setColor(0xCCB91C1C.toInt())
+                cornerRadius = dp(11).toFloat()
+            }
+            layoutParams = LinearLayout.LayoutParams(-2, dp(22)).apply { leftMargin = dp(8) }
+            visibility = View.GONE
+            setOnClickListener {
+                when (SendOrchestrator.state) {
+                    SendOrchestrator.State.CONVERTING -> SendOrchestrator.cancel()
+                    SendOrchestrator.State.INJECTING -> SendOrchestrator.reset()
+                    else -> {}
+                }
             }
         }
+        topRow.addView(handle)
+        topRow.addView(stop)
         label = TextView(this).apply {
             text = "按住说话"
             setTextColor(Color.WHITE)
@@ -96,7 +121,7 @@ class FloatingBarService : Service() {
             }
             layoutParams = LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) }
         }
-        root.addView(handle)
+        root.addView(topRow)
         root.addView(label)
         root.addView(hint)
         root.addView(hold)
@@ -132,19 +157,15 @@ class FloatingBarService : Service() {
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     val st = SendOrchestrator.state
-                    if (st == SendOrchestrator.State.CONVERTING) {
-                        SendOrchestrator.cancel()
-                        true
-                    } else if (st == SendOrchestrator.State.INJECTING) {
-                        SendOrchestrator.reset()
-                        true
-                    } else if (st == SendOrchestrator.State.READY) {
+                    if (st == SendOrchestrator.State.READY) {
                         SendOrchestrator.sendToQq(this@FloatingBarService)
                         true
                     } else if (st == SendOrchestrator.State.DONE) {
                         SendOrchestrator.reset()
                         true
-                    } else if (st == SendOrchestrator.State.SENDING) {
+                    } else if (st == SendOrchestrator.State.SENDING ||
+                        st == SendOrchestrator.State.CONVERTING ||
+                        st == SendOrchestrator.State.INJECTING) {
                         false
                     } else if (st != SendOrchestrator.State.RECORDING) {
                         // FAILED / READY 状态下再按一次即可重新开始，不会卡死
@@ -200,6 +221,8 @@ class FloatingBarService : Service() {
                 SendOrchestrator.State.DONE -> "已发送"
                 else -> "按住录音"
             }
+            stop.visibility = if (s.state == SendOrchestrator.State.CONVERTING ||
+                s.state == SendOrchestrator.State.INJECTING) View.VISIBLE else View.GONE
             ui.postDelayed(this, 250)
         }
     }
