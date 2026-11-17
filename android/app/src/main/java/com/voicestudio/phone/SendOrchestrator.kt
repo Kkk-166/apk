@@ -92,33 +92,7 @@ object SendOrchestrator {
         }
     }
 
-    /** 启动注入并等待 READY；失败明确上报，不误报成功。 */
-    private fun startInjection(context: Context, path: String) {
-        try {
-            ShizukuMicController.startWav(context, TARGET_PACKAGE, path, 60)
-            var waited = 0
-            while (waited < 20_000 && !ShizukuMicController.shellLog.contains("READY")) {
-                if (!ShizukuMicController.active) break
-                Thread.sleep(100)
-                waited += 100
-            }
-            if (!ShizukuMicController.active) {
-                fail(ShizukuMicController.error ?: "注入未启动")
-                return
-            }
-            if (!ShizukuMicController.shellLog.contains("READY")) {
-                fail("注入未就绪：" + ShizukuMicController.status)
-                return
-            }
-            state = State.READY
-            message = "注入中 %.1f s，去 QQ 按住说话".format(injectDuration)
-        } catch (t: Throwable) {
-            android.util.Log.e("SendOrchestrator", "inject failed", t)
-            fail("注入失败：" + (t.message ?: t.toString()))
-        }
-    }
-
-    /** 用户确认后：无障碍长按 QQ 语音键，时长 = 注入 WAV 时长。 */
+    /** 用户确认后：启动注入 -> 等 READY -> 无障碍长按 QQ 语音键（时长 = 注入 WAV）。 */
     fun sendToQq(context: Context) {
         if (state != State.READY) return
         val service = QQAccessibilityService.getInstance()
@@ -126,10 +100,21 @@ object SendOrchestrator {
             fail("无障碍服务未开启：请在系统设置里启用 VoiceStudio 的无障碍")
             return
         }
+        val path = convertedPath ?: run { fail("没有可发送的音频"); return }
         state = State.SENDING
-        message = "发送中…"
+        message = "注入准备中…"
         thread(name = "float-send") {
             try {
+                // 先启动注入并等 READY，再按住 QQ，保证 WAV 从第 0 帧开始（开头静音吸收延迟）
+                ShizukuMicController.startWav(context, TARGET_PACKAGE, path, 60)
+                if (!ShizukuMicController.active) {
+                    fail(ShizukuMicController.error ?: "注入未启动")
+                    return@thread
+                }
+                if (!ShizukuMicController.shellLog.contains("READY")) {
+                    fail("注入未就绪：" + ShizukuMicController.status)
+                    return@thread
+                }
                 val point = service.findVoiceButton()
                 if (point == null) {
                     fail("找不到 QQ 语音按钮：请先打开 QQ 聊天并切到按住说话")
@@ -182,20 +167,20 @@ object SendOrchestrator {
             if (cancelled) return
             // 1) 公共可见副本（Music/VoiceStudio）
             publicName = runCatching { savePublic(context, y) }.getOrNull()
-            // 2) 注入副本：尾部补 300 ms 静音，吸收录音检测延迟
-            val pad = (Rvc.SR * 0.3).toInt()
-            val inject = FloatArray(y.size + pad)
-            System.arraycopy(y, 0, inject, 0, y.size)
+            // 2) 注入副本：开头 500 ms + 尾部 300 ms 静音，吸收注入启动与长按时序差
+            val padHead = (Rvc.SR * 0.5).toInt()
+            val padTail = (Rvc.SR * 0.3).toInt()
+            val inject = FloatArray(y.size + padHead + padTail)
+            System.arraycopy(y, 0, inject, padHead, y.size)
             val outDir = File(base, "float").apply { mkdirs() }
             val out = File(outDir, "inject-" + System.currentTimeMillis() + ".wav")
             AudioIo.writeWav(out, inject)
             convertedPath = out.absolutePath
             injectDuration = WavInfo.durationSeconds(out) ?: 0.0
             if (cancelled) return
-            // 3) 启动内置 WAV 注入（P2 不自动按住，用户手动切 QQ）
-            state = State.INJECTING
-            message = "注入准备中…"
-            thread(name = "float-inject") { startInjection(context, out.absolutePath) }
+            // 3) 只到「准备发送」；点发送时才启动注入并长按
+            state = State.READY
+            message = "已就绪 %.1f s，点一下发送".format(injectDuration)
         } catch (t: Throwable) {
             android.util.Log.e("SendOrchestrator", "convert failed", t)
             fail("转换失败：" + (t.message ?: t.toString()))
