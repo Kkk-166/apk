@@ -458,7 +458,16 @@ class MainActivity : Activity() {
 
     private fun currentModel(): File? = models.getOrNull(f<Spinner>(R.id.model).selectedItemPosition)
 
-    /** 悬浮窗变声入口：依次要求「显示在其他应用上层」和录音权限。 */
+    /** 悬浮窗变声入口：已开启则关闭；否则依次要求悬浮窗和录音权限。 */
+    private fun toggleFloatingBar() {
+        if (FloatingBarService.running) {
+            stopService(Intent(this, FloatingBarService::class.java))
+            toast("悬浮窗已关闭")
+            return
+        }
+        startFloatingBar()
+    }
+
     private fun startFloatingBar() {
         if (!Settings.canDrawOverlays(this)) {
             startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
@@ -983,8 +992,8 @@ class MainActivity : Activity() {
             textSize = 11f; setTextColor(getColor(R.color.muted)); setPadding(0, dp(10), 0, 0)
         })
         compute.addView(Button(this).apply {
-            text = "悬浮窗变声（在 QQ 里长按录音）"
-            setOnClickListener { startFloatingBar() }
+            text = "悬浮窗变声（开 / 关）"
+            setOnClickListener { toggleFloatingBar() }
         }, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(8) })
         // records
         val records = card(page)

@@ -17,6 +17,7 @@ object SendOrchestrator {
     @Volatile var message = ""; private set
     @Volatile var recordSeconds = 0; private set
     @Volatile var convertedPath: String? = null; private set
+    @Volatile var convertSeconds = 0.0; private set
 
     private var recorder: Recorder? = null
     private var startedAt = 0L
@@ -59,6 +60,7 @@ object SendOrchestrator {
             message = ""
             convertedPath = null
             recordSeconds = 0
+            convertSeconds = 0.0
         }
     }
 
@@ -68,18 +70,20 @@ object SendOrchestrator {
             val commonDir = File(base, "common")
             val modelsDir = File(base, "models")
             val dir = pickModel(context, modelsDir) ?: throw IllegalStateException("没有可用模型")
+            val started = System.currentTimeMillis()
             val engine = Rvc(commonDir, dir, 4, "cpu", "model.dec.onnx", "cpu", allowFallback = true)
             val y = try {
                 engine.convert(x, settingsOf(dir))
             } finally {
                 engine.close()
             }
+            convertSeconds = (System.currentTimeMillis() - started) / 1000.0
             val outDir = File(base, "float").apply { mkdirs() }
             val out = File(outDir, "float-" + System.currentTimeMillis() + ".wav")
             AudioIo.writeWav(out, y)
             convertedPath = out.absolutePath
             state = State.READY
-            message = "转换完成"
+            message = "转换完成 %.1f s".format(convertSeconds)
         } catch (t: Throwable) {
             android.util.Log.e("SendOrchestrator", "convert failed", t)
             fail("转换失败：" + (t.message ?: t.toString()))
