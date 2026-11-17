@@ -110,7 +110,7 @@ class M1BenchActivity : Activity() {
                 // 实验：1.86-1.97s、3.77-3.88s 强制 f0=0（10ms 帧）
                 engine.close()
                 val zero = IntArray(12) { 186 + it } + IntArray(12) { 377 + it }
-                val engine2 = Rvc(commonDir, dir, 4, "cpu", "model.dec.onnx", "cpu", allowFallback = true, forceZeroF0Frames = zero)
+                val engine2 = Rvc(commonDir, dir, 4, "cpu", "model.dec.onnx", "cpu", allowFallback = true, forceZeroGlobalFrames = zero)
                 val y2 = engine2.convert(x, settings)
                 AudioIo.writeWav(File(dumpDir, "android_output_f0zero.wav"), y2)
                 engine2.close()

@@ -40,8 +40,8 @@ class Rvc(commonDir: File, private val modelDir: File, private val threads: Int 
           /** Diagnosis: ORT profiles of the NPU sessions (which device ran each node) go here as <model>_*.json. */
           private val profileDir: File? = null,
           private val allowFallback: Boolean = false,
-          /** 实验：这些 10 ms 帧强制 f0=0（用于验证误检瞬态） */
-          private val forceZeroF0Frames: IntArray? = null,
+          /** 实验：这些全局 10 ms 帧强制 f0=0（用于验证误检瞬态） */
+          private val forceZeroGlobalFrames: IntArray? = null,
           /** M1c: write raw intermediate tensors here, once per name. */
           private val dumpDir: File? = null) : AutoCloseable {
     /** A realtime step: [block] new frames, the last [tail] frames of the window decoded (block + crossfade + search). */
@@ -232,7 +232,7 @@ class Rvc(commonDir: File, private val modelDir: File, private val threads: Int 
                 x16.copyOfRange(lo, hi).copyOf(window)
             }
             // only the frames this window contributes go through the decoder, not its context
-            val y = window(win, st, (start - lo) / 160, (coreEnd - lo + 159) / 160)
+            val y = window(win, st, (start - lo) / 160, (coreEnd - lo + 159) / 160, lo / 160)
             val a = (start - lo) * 3
             val n = (coreEnd - lo) * 3 - a
             val f = fade * 3
@@ -258,9 +258,13 @@ class Rvc(commonDir: File, private val modelDir: File, private val threads: Int 
 
     /** One window of 16 kHz audio (a multiple of 320 samples) -> 48 kHz audio of the same duration, of which only
      *  frames [keepFrom, keepTo) are decoded (the rest is the window's context and stays silent). */
-    private fun window(x16: FloatArray, st: Settings, keepFrom: Int, keepTo: Int): FloatArray {
+    private fun window(x16: FloatArray, st: Settings, keepFrom: Int, keepTo: Int, globalStart: Int = 0): FloatArray {
         val clock = Lap()
         val (z, f0, pLen) = analyze(x16, st, null, clock)
+        forceZeroGlobalFrames?.forEach { g ->
+            val local = g - globalStart
+            if (local in f0.indices) f0[local] = 0.0
+        }
         val factor = 2.0.pow(st.formant / 12)
         val n = ceil(pLen * factor).toInt()
         val zn = Dsp.stretchLinear(z, 192, pLen, n)
@@ -348,7 +352,6 @@ class Rvc(commonDir: File, private val modelDir: File, private val threads: Int 
         }
         clock.lap(3)
         dump("f0_raw", FloatArray(pLen) { f0[it].toFloat() }, intArrayOf(pLen))
-        forceZeroF0Frames?.forEach { if (it in f0.indices) f0[it] = 0.0 }
         f0 = Dsp.fillUnvoiced(f0, if (st.unvoicedKeep) UNVOICED_FILL_FRAMES else null)
         f0 = Dsp.shapePitch(f0, st.lowKnee, st.lowRatio, st.highKnee, st.highRatio,
             INTONATION_CENTER_HZ, if (st.expand) st.expandRatio else 1.0)
